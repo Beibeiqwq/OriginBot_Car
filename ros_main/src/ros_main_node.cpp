@@ -117,18 +117,18 @@ public:
         // TODO 考虑修改变量名 改为参数导入？
         CvThreshold.lower_red_ = cv::Scalar(0, 180, 200);
         CvThreshold.upper_red_ = cv::Scalar(179, 255, 255);
+        // ! 灰色阈值
+        CvThreshold.lower_gray_ = cv::Scalar(0, 0, 130);
+        CvThreshold.upper_gray_ = cv::Scalar(20, 95, 212);
 
-        CvThreshold.lower_gray_ = cv::Scalar(110, 0, 0);
-        CvThreshold.upper_gray_ = cv::Scalar(179, 100, 85);
+        CvThreshold.lower_yellow_ = cv::Scalar(18, 125, 210);
+        CvThreshold.upper_yellow_ = cv::Scalar(55, 255, 255);
 
-        CvThreshold.lower_yellow_ = cv::Scalar(13, 255, 65);
-        CvThreshold.upper_yellow_ = cv::Scalar(40, 255, 255);
-
-        CvThreshold.lower_blue_ = cv::Scalar(100, 220, 55);
+        CvThreshold.lower_blue_ = cv::Scalar(100, 45, 46);
         CvThreshold.upper_blue_ = cv::Scalar(124, 255, 255);
 
-        CvThreshold.lower_green_ = cv::Scalar(53, 163, 30);
-        CvThreshold.upper_green_ = cv::Scalar(78, 255, 255);
+        CvThreshold.lower_green_ = cv::Scalar(39, 90, 46);
+        CvThreshold.upper_green_ = cv::Scalar(75, 255, 255);
 
         // * PID参数
         // TODO 考虑修正 改为参数导入
@@ -723,7 +723,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         int min_block_width = 20;
         int min_block_height = 20;
         int gray_pixel_threshold = 4000;
-        int surrounding_area_margin = 30;
+        int surrounding_area_margin = 3;
         // * 遍历找到的轮廓
         for (size_t i = 0; i < contours.size(); i++)
         {
