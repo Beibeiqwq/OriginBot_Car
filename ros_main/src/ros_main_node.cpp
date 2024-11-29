@@ -26,16 +26,17 @@ using geometry_msgs::msg::Twist;
 #ifndef M_PI
 #define M_PI 3.1415926535
 #endif
-
+/// @brief 程序状态
 enum StructRobotState
 {
-    STATE_WAIT_ENTER,
     STATE_WAIT_CMD,
+    STATE_WAIT_ENTER,
     STATE_STRAIGHT,
     STATE_ROTATE,
     STATE_ARRIVE_GRANRAY,
     STATE_FIND_BALL
 };
+/// @brief 图像回调状态
 enum StructImageState
 {
     IMAGE_STATE_WAIT,
@@ -47,12 +48,13 @@ enum StructImageState
 class RosMainNode : public rclcpp::Node
 {
 public:
-    RosMainNode() : Node("ros_main_node"), state_(STATE_WAIT_ENTER)
+    RosMainNode() : Node("ros_main_node"), state_(STATE_WAIT_CMD)
     {
         start_detect_sub_ = this->create_subscription<std_msgs::msg::String>(
             "/start_detect", 10,
             [this](const std_msgs::msg::String::SharedPtr msg)
             {
+                // * 订阅红绿灯识别节点
                 startDetectCallback(msg);
             });
 
@@ -60,6 +62,7 @@ public:
             "/image_raw", 10,
             [this](const sensor_msgs::msg::Image::SharedPtr msg)
             {
+                // * 图像回调
                 imageCallback(msg);
             });
 
@@ -67,6 +70,8 @@ public:
             "imu", 10,
             [this](const sensor_msgs::msg::Imu::SharedPtr msg)
             {
+                // * IMU回调
+                // ! 已废弃 IMU有漂移
                 imuCallback(msg);
             });
 
@@ -74,6 +79,7 @@ public:
             std::chrono::milliseconds(100),
             [this]()
             {
+                // * 状态机
                 timerCallback();
             });
 
@@ -81,12 +87,13 @@ public:
         robot_voice_pub_ = this->create_publisher<std_msgs::msg::String>("/robot_voice", 10);
         twist_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
 
-        
-
+        // * 三个兵营的到达标志位
         CampFlags.cavalryCampArrived = false;
         CampFlags.infantryCampArrived = false;
         CampFlags.tankCampArrived = false;
 
+        // * 机器运动控制节点
+        // TODO 考虑修改为参数导入
         RobotRun.bTurnLeft = false;
         RobotRun.bTurnRight = false;
         RobotRun.nTurnOffset = 0;
@@ -95,16 +102,22 @@ public:
         RobotRun.fMaxSpeed = 0.3;
         RobotRun.fMaxTurn = 1.3;
         
+        // * 机器识别标志位
         RobotFlags.bBallFound = false;
         RobotFlags.bFlagFound = false;
         RobotFlags.bGranaryFound = false;
         
+        // * 机器识别计数
         RobotCount.nFlagCount = 0;
         RobotCount.nStartCount = 0;
 
+        // * 红球颜色阈值
+        // TODO 考虑修改变量名 改为参数导入？
         CvThreshold.lower_red_ = cv::Scalar(0, 180, 200);
         CvThreshold.upper_red_ = cv::Scalar(179, 255, 255);
 
+        // * PID参数
+        // TODO 考虑修正 改为参数导入
         PIDControl.kp1 = 0.011;
         PIDControl.ki1 = 0.0;
         PIDControl.kd1 = 0.003;
@@ -113,11 +126,13 @@ public:
         PIDControl.kd2 = 0.002;
         PIDControl.error = 0;
         PIDControl.last_error = 0;
-        // int _check_flag;
-        // cout << "[Init]键入任意数字开始.... 按CTRL+Z退出" << endl;
-        // cin >> _check_flag;
+
+        // * 启动程序
+        int _check_flag;
+        cout << "[Init]键入任意数字开始.... 按CTRL+Z退出" << endl;
+        cin >> _check_flag;
         ImageState_ = IMAGE_STATE_FOLLOW_LINE;
-        cout <<"初始化完成"<< endl;
+        state_ = STATE_WAIT_ENTER;
     }
 
 private:
@@ -126,26 +141,36 @@ private:
         switch (state_)
         {
         case STATE_WAIT_CMD:
+            // * 初始化完成
+            break;
+
+        case STATE_WAIT_ENTER:
+            // * 等待红绿灯
             break;
         case STATE_STRAIGHT:
+            // * 识别旗帜赛道
+            // ! 此处应调整为直道PID 等待识别完成
+            // TODO 识别到旗帜后，进入调整为弯道PID
+            if (RobotCount.nFlagCount == 3)
             {
-                if(RobotCount.nFlagCount == 3)
-                {
-                    state_ = STATE_ROTATE;
-                    RCLCPP_INFO(this->get_logger(), "State changed to STATE_STRAIGHT.");
-                    break;
-                }
-                SetSpeed(0.24,0);
-                if(RobotFlags.bFlagFound)
-                {
-                    SetSpeed(0.24,0);
-                    ProcessCamp(strFlag);
-                }
-
+                state_ = STATE_ROTATE;
+                RCLCPP_INFO(this->get_logger(), "State changed to STATE_ROTATE.");
+                break;
             }
+            // 此处SetSpeed由图像回调控制 等待修复
+            SetSpeed(0.24, 0);
+            if (RobotFlags.bFlagFound)
+            {
+                SetSpeed(0.24, 0);
+                ProcessCamp(strFlag);
+            }
+
             break;
         case STATE_ROTATE:
-            SetSpeed(0.4,0);
+        // * 弯道避障赛道
+        // ! 此处应调整为弯道PID 等待过弯
+        // * 识别到粮仓旗帜后 进入找球行为
+            SetSpeed(0.4,0); //此处Speed由图像回调控制 等待修复
             if(RobotRun.bTurnLeft == true)
             {
                 SetSpeed(0,0.4);
@@ -158,15 +183,18 @@ private:
             {
                 SetSpeed(0.4,0);
             }
-
+            // * 找到粮仓后 状态切换
             if(RobotFlags.bGranaryFound == true)
             {
                 state_ = STATE_ARRIVE_GRANRAY;
-                break;
+                break; 
             }
 
             break;
         case STATE_ARRIVE_GRANRAY:
+            // * 播报后停止四秒 寻找球
+            // ! 回调函数也得停止 
+            // TODO 等待添加回调函数位
             Speak("到达粮仓");
             std::this_thread::sleep_for(std::chrono::seconds(4));
             state_ = STATE_FIND_BALL;
@@ -231,10 +259,9 @@ private:
         float last_error;
 
     };
-    // 状态机
-    // 程序变量
+
     std::string strFlag;
-    // 标志位
+    // * 结构体初始化
     StructCampFlags CampFlags;
     StructRobotRun RobotRun;
     StructRobotFlag RobotFlags;
@@ -244,30 +271,30 @@ private:
     StructCvThreshold CvThreshold;
     StructPIDControl PIDControl;
 
-    // 订阅器
+    // * 订阅器
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr start_detect_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
 
-    // 发布器
+    // * 发布器
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twist_publisher_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr robot_voice_pub_;
     
 
-    // 定时器
+    // * 定时器
     rclcpp::TimerBase::SharedPtr timer_;
 
-    // 回调函数
+    // * 回调函数
     void startDetectCallback(const std_msgs::msg::String::SharedPtr msg);
     void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
     void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
 
-    // 功能函数
+    // * 功能函数
     void Speak(std::string strToSpeak);
     void SetSpeed(float lineX,float angZ);
     void RobotCtl(const Twist& msg) const;
     void FindBall();
-    // 程序功能函数
+    // * 程序功能函数
     void ProcessCamp(const std::string& strFlag);
     void CalcPID();
     float Update_kp_Speed(int error,int absmin, int absmax);
@@ -386,7 +413,8 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
             // vel_cmd.linear.x = fVelFoward;
             // vel_cmd.angular.z = fVelTurn;
-            // 丑陋的滤波
+            // ! 丑陋的滤波
+            // TODO 考虑更改
             if (fVelFoward >= 0 && fVelFoward <= 0.04)
             {
                 fVelFoward = 0;
@@ -651,8 +679,13 @@ void RosMainNode::Speak(std::string strToSpeak)
     robot_voice_pub_->publish(voice_msg);
 }
 
+/// @brief 速度控制函数
+/// @param lineX 
+/// @param angZ 
 void RosMainNode::SetSpeed(float lineX,float angZ)
 {
+    // ! angZ > 0 左转
+    // ! angZ < 0 右转
     //auto twist = geometry_msgs::msg::Twist();
     geometry_msgs::msg::Twist twist;
     if(lineX >= RobotRun.fMaxSpeed)
@@ -672,10 +705,11 @@ void RosMainNode::SetSpeed(float lineX,float angZ)
 
 void RosMainNode::RobotCtl(const Twist &msg) const
 {
-    // !使用时需传入指针  RobotCtl(*pose);
+    // ! 使用时需传入指针  RobotCtl(*pose);
     twist_publisher_->publish(msg);
 }
 
+/// @brief 找球行为
 void RosMainNode::FindBall()
 {
     auto message = geometry_msgs::msg::Twist();
@@ -699,6 +733,9 @@ void RosMainNode::FindBall()
 /**********************************************************/
 /*                     程序功能函数                         */
 /**********************************************************/
+
+/// @brief 旗帜处理函数 -- 语音
+/// @param strFlag 
 void RosMainNode::ProcessCamp(const std::string& strFlag) {
     std::map<std::string, std::string> campMessages = {
         {"cavalryCamp", "到达骑兵营"},
@@ -733,7 +770,13 @@ void RosMainNode::CalcPID()
 {
 
 }
-
+/// @brief PID-Kp参数更新
+/// @param error 
+/// @param absmin 
+/// @param absmax 
+/// @return Kp参数
+// ! 未进行弯道和直道判断 考虑最小二乘法
+// TODO 优化该函数
 float RosMainNode::Update_kp_Speed(int error,int absmin, int absmax)
 {
     if (abs(error) < absmin)
