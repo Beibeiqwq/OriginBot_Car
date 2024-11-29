@@ -15,8 +15,8 @@
 #include <algorithm>
 #include <vector>
 
-//#define Desktop
-#define DEBUG
+// #define Desktop
+//#define DEBUG
 
 using namespace std;
 using namespace cv;
@@ -83,8 +83,7 @@ public:
                 timerCallback();
             });
 
-
-        robot_voice_pub_ = this->create_publisher<std_msgs::msg::String>("/robot_voice", 10);
+        robot_voice_pub_ = this->create_publisher<std_msgs::msg::String>("/robotvoice", 10);
         twist_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
 
         // * 三个兵营的到达标志位
@@ -101,12 +100,15 @@ public:
         RobotRun.targetYaw = 0;
         RobotRun.fMaxSpeed = 0.3;
         RobotRun.fMaxTurn = 1.3;
-        
+
         // * 机器识别标志位
         RobotFlags.bBallFound = false;
         RobotFlags.bFlagFound = false;
-        RobotFlags.bGranaryFound = false;
-        
+        RobotFlags.bgranaryFound = false;
+        RobotFlags.bcavalryFound = false;
+        RobotFlags.bgranaryFound = false;
+        RobotFlags.btankFound = false;
+
         // * 机器识别计数
         RobotCount.nFlagCount = 0;
         RobotCount.nStartCount = 0;
@@ -116,8 +118,8 @@ public:
         CvThreshold.lower_red_ = cv::Scalar(0, 180, 200);
         CvThreshold.upper_red_ = cv::Scalar(179, 255, 255);
 
-        CvThreshold.lower_gray_ = cv::Scalar(0, 0, 14);
-        CvThreshold.upper_gray_ = cv::Scalar(179, 100, 41);
+        CvThreshold.lower_gray_ = cv::Scalar(110, 0, 0);
+        CvThreshold.upper_gray_ = cv::Scalar(179, 100, 85);
 
         CvThreshold.lower_yellow_ = cv::Scalar(13, 255, 65);
         CvThreshold.upper_yellow_ = cv::Scalar(40, 255, 255);
@@ -144,7 +146,9 @@ public:
         cout << "[Init]键入任意数字开始.... 按CTRL+Z退出" << endl;
         cin >> _check_flag;
         ImageState_ = IMAGE_STATE_FOLLOW_LINE;
-        state_ = STATE_WAIT_ENTER;
+        // ! 调试时更改 最后记得改回
+        //state_ = STATE_WAIT_ENTER;
+        state_ = STATE_STRAIGHT;
     }
 
 private:
@@ -170,52 +174,53 @@ private:
                 break;
             }
             // 此处SetSpeed由图像回调控制 等待修复
-            SetSpeed(0.24, 0);
+            //SetSpeed(0.24, 0);
             if (RobotFlags.bFlagFound)
             {
-                SetSpeed(0.24, 0);
+                //SetSpeed(0.24, 0);
                 ProcessCamp(strFlag);
             }
 
             break;
         case STATE_ROTATE:
-        // * 弯道避障赛道
-        // ! 此处应调整为弯道PID 等待过弯
-        // * 识别到粮仓旗帜后 进入找球行为
-            SetSpeed(0.4,0); //此处Speed由图像回调控制 等待修复
-            if(RobotRun.bTurnLeft == true)
+            // * 弯道避障赛道
+            // ! 此处应调整为弯道PID 等待过弯
+            // * 识别到粮仓旗帜后 进入找球行为
+            SetSpeed(0.4, 0); // 此处Speed由图像回调控制 等待修复
+            if (RobotRun.bTurnLeft == true)
             {
-                SetSpeed(0,0.4);
+                SetSpeed(0, 0.4);
             }
-            else if(RobotRun.bTurnRight == true)
+            else if (RobotRun.bTurnRight == true)
             {
-                SetSpeed(0,-0.4);
+                SetSpeed(0, -0.4);
             }
             else
             {
-                SetSpeed(0.4,0);
+                SetSpeed(0.4, 0);
             }
             // * 找到粮仓后 状态切换
-            if(RobotFlags.bGranaryFound == true)
+            if (RobotFlags.bgranaryFound == true)
             {
                 state_ = STATE_ARRIVE_GRANRAY;
-                break; 
+                break;
             }
 
             break;
         case STATE_ARRIVE_GRANRAY:
             // * 播报后停止四秒 寻找球
-            // ! 回调函数也得停止 
+            // ! 回调函数也得停止
             // TODO 等待添加回调函数位
             Speak("到达粮仓");
+            SetSpeed(0, 0);
             std::this_thread::sleep_for(std::chrono::seconds(4));
             state_ = STATE_FIND_BALL;
             break;
         case STATE_FIND_BALL:
             // TODO 寻球逻辑 等待编写
-            if(!RobotFlags.bBallFound)
+            if (!RobotFlags.bBallFound)
             {
-                FindBall(); //未编写
+                FindBall(); // 未编写
             }
             break;
         default:
@@ -225,13 +230,14 @@ private:
 
     struct StructCampFlags
     {
-        bool cavalryCampArrived  = false;
-        bool infantryCampArrived = false;
-        bool tankCampArrived     = false;
+        bool cavalryCampArrived = false;  // 骑兵营
+        bool infantryCampArrived = false; // 步兵营
+        bool tankCampArrived = false;     // 战车营
+        bool granaryArrived = false;      // 粮仓
     };
     struct StructRobotRun
     {
-        bool bTurnLeft  = false;
+        bool bTurnLeft = false;
         bool bTurnRight = false;
 
         double nTurnOffset = 0;
@@ -240,29 +246,33 @@ private:
         double targetPoint = 0;
 
         float fMaxSpeed = 0.4;
-        float fMaxTurn  = 0.5;
+        float fMaxTurn = 0.5;
     };
     struct StructRobotFlag
     {
         bool bBallFound = false;
         bool bFlagFound = false;
-        bool bGranaryFound = false;
+
+        bool bgranaryFound = false;  // 粮仓
+        bool bcavalryFound = false;  // 骑兵营
+        bool binfantryFound = false; // 步兵营
+        bool btankFound = false;     // 战车营
     };
     struct StructRobotCount
     {
-        int nFlagCount  = 0;
+        int nFlagCount = 0;
         int nStartCount = 0;
     };
     struct StructCvThreshold
     {
-        cv::Scalar lower_red_ = cv::Scalar(0, 180, 200);    // 最小的红色
-        cv::Scalar upper_red_ = cv::Scalar(179, 255, 255);  // 最大的红色
+        cv::Scalar lower_red_ = cv::Scalar(0, 180, 200);   // 最小的红色
+        cv::Scalar upper_red_ = cv::Scalar(179, 255, 255); // 最大的红色
 
-        cv::Scalar lower_yellow_ = cv::Scalar(13, 255, 65); // 黄色的下界
+        cv::Scalar lower_yellow_ = cv::Scalar(13, 255, 65);  // 黄色的下界
         cv::Scalar upper_yellow_ = cv::Scalar(40, 255, 255); // 黄色的上界
 
-        cv::Scalar lower_gray_ = cv::Scalar(0, 0, 14);     // 灰色的下界
-        cv::Scalar upper_gray_ = cv::Scalar(179, 100, 41);  // 灰色的上界
+        cv::Scalar lower_gray_ = cv::Scalar(110, 0, 0);     // 灰色的下界
+        cv::Scalar upper_gray_ = cv::Scalar(179, 100, 110); // 灰色的上界
 
         cv::Scalar lower_blue_ = cv::Scalar(100, 220, 55);
         cv::Scalar upper_blue_ = cv::Scalar(124, 255, 255);
@@ -282,10 +292,9 @@ private:
 
         float error;
         float last_error;
-
     };
 
-    std::string strFlag;
+    std::string strFlag = "";
     // * 结构体初始化
     StructCampFlags CampFlags;
     StructRobotRun RobotRun;
@@ -304,7 +313,6 @@ private:
     // * 发布器
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twist_publisher_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr robot_voice_pub_;
-    
 
     // * 定时器
     rclcpp::TimerBase::SharedPtr timer_;
@@ -316,14 +324,13 @@ private:
 
     // * 功能函数
     void Speak(std::string strToSpeak);
-    void SetSpeed(float lineX,float angZ);
-    void RobotCtl(const Twist& msg) const;
+    void SetSpeed(float lineX, float angZ);
+    void RobotCtl(const Twist &msg) const;
     void FindBall();
     // * 程序功能函数
-    void ProcessCamp(const std::string& strFlag);
+    void ProcessCamp(const std::string &strFlag);
     void CalcPID();
-    float Update_kp_Speed(int error,int absmin, int absmax);
-
+    float Update_kp_Speed(int error, int absmin, int absmax);
 };
 /**********************************************************/
 /*                       回调函数                          */
@@ -354,10 +361,10 @@ void RosMainNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
     double roll, pitch, yaw;
     m.getRPY(roll, pitch, yaw);
 
-    //RCLCPP_INFO(this->get_logger(), "Yaw: %f radians", yaw);
+    // RCLCPP_INFO(this->get_logger(), "Yaw: %f radians", yaw);
 
     RobotRun.currentYaw = yaw * 180.0 / M_PI;
-    //RCLCPP_INFO(this->get_logger(), "Yaw: %f degrees", RobotRun.currentYaw);
+    // RCLCPP_INFO(this->get_logger(), "Yaw: %f degrees", RobotRun.currentYaw);
 }
 
 void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
@@ -668,7 +675,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         float speedZ = 0;
         float auto_kp = Update_kp_Speed(PIDControl.error, 20, 110);
         // float auto_kp = PIDControl.kp1;
-        RCLCPP_INFO(this->get_logger(), "Middle Offset: %d", middle_offset);
+        //RCLCPP_INFO(this->get_logger(), "Middle Offset: %d", middle_offset);
         // * 转向逻辑
         // ? 好像两个if的功能一样 考虑替换为 != 0
         if (middle_offset > 0)
@@ -715,7 +722,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         findContours(yellow_mask, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
         int min_block_width = 20;
         int min_block_height = 20;
-        int gray_pixel_threshold = 100;
+        int gray_pixel_threshold = 4000;
         int surrounding_area_margin = 30;
         // * 遍历找到的轮廓
         for (size_t i = 0; i < contours.size(); i++)
@@ -747,6 +754,9 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             Mat hsv_surrounding;
             cvtColor(surrounding_roi, hsv_surrounding, COLOR_BGR2HSV);
 
+            // * 将旗帜标志位置为1
+            RobotFlags.bFlagFound = true;
+
             // * 1. 识别灰色区域
             Mat gray_mask;
             inRange(hsv_surrounding, CvThreshold.lower_gray_, CvThreshold.upper_gray_, gray_mask);
@@ -757,6 +767,9 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             // 如果灰色像素点数目超过阈值，说明附近有灰色区域
             if (gray_pixel_count > gray_pixel_threshold)
             {
+                // * 找到战车营
+                RobotFlags.btankFound = true;
+                strFlag = "tankCamp";
                 // 在图像上标记灰色区域
                 for (int y = 0; y < gray_mask.rows; y++)
                 {
@@ -771,18 +784,21 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 }
 
                 // 输出信息，表示检测到灰色区域
-                RCLCPP_INFO(this->get_logger(), "Detected gray area near yellow block with %d gray pixels.", gray_pixel_count);
+               // RCLCPP_INFO(this->get_logger(), "Detected gray area near yellow block with %d gray pixels.", gray_pixel_count);
             }
             // * 2. 识别绿色区域
             Mat green_mask;
-            Scalar green_lower = CvThreshold.lower_green_;   // 绿色HSV下限
+            Scalar green_lower = CvThreshold.lower_green_; // 绿色HSV下限
             Scalar green_upper = CvThreshold.upper_green_; // 绿色HSV上限
             inRange(hsv_surrounding, green_lower, green_upper, green_mask);
             int green_pixel_count = countNonZero(green_mask);
-            int green_pixel_threshold = 100;
+            int green_pixel_threshold = 3000;
             // 如果绿色像素点数目超过阈值，说明附近有绿色区域
             if (green_pixel_count > green_pixel_threshold)
             {
+                // * 找到步兵营
+                RobotFlags.binfantryFound = true;
+                strFlag = "infantryCamp";
                 // 在图像上标记绿色区域
                 for (int y = 0; y < green_mask.rows; y++)
                 {
@@ -794,19 +810,22 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                         }
                     }
                 }
-                RCLCPP_INFO(this->get_logger(), "Detected green area near yellow block with %d green pixels.", green_pixel_count);
+                //RCLCPP_INFO(this->get_logger(), "Detected green area near yellow block with %d green pixels.", green_pixel_count);
             }
 
             // * 3. 识别蓝色区域
             Mat blue_mask;
-            Scalar blue_lower = CvThreshold.lower_blue_;   // 蓝色HSV下限
+            Scalar blue_lower = CvThreshold.lower_blue_; // 蓝色HSV下限
             Scalar blue_upper = CvThreshold.upper_blue_; // 蓝色HSV上限
             inRange(hsv_surrounding, blue_lower, blue_upper, blue_mask);
             int blue_pixel_count = countNonZero(blue_mask);
-            int blue_pixel_threshold = 100;
+            int blue_pixel_threshold = 3000;
             // 如果蓝色像素点数目超过阈值，说明附近有蓝色区域
             if (blue_pixel_count > blue_pixel_threshold)
             {
+                // * 找到骑兵营
+                RobotFlags.bcavalryFound = true;
+                strFlag = "cavalryCamp";
                 // 在图像上标记蓝色区域
                 for (int y = 0; y < blue_mask.rows; y++)
                 {
@@ -818,7 +837,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                         }
                     }
                 }
-                RCLCPP_INFO(this->get_logger(), "Detected blue area near yellow block with %d blue pixels.", blue_pixel_count);
+                //RCLCPP_INFO(this->get_logger(), "Detected blue area near yellow block with %d blue pixels.", blue_pixel_count);
             }
         }
 
@@ -832,7 +851,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 /**********************************************************/
 
 /// @brief 机器说话
-/// @param strToSpeak 
+/// @param strToSpeak
 void RosMainNode::Speak(std::string strToSpeak)
 {
     std_msgs::msg::String voice_msg;
@@ -841,24 +860,24 @@ void RosMainNode::Speak(std::string strToSpeak)
 }
 
 /// @brief 速度控制函数
-/// @param lineX 
-/// @param angZ 
-void RosMainNode::SetSpeed(float lineX,float angZ)
+/// @param lineX
+/// @param angZ
+void RosMainNode::SetSpeed(float lineX, float angZ)
 {
     // ! angZ > 0 左转
     // ! angZ < 0 右转
-    //auto twist = geometry_msgs::msg::Twist();
+    // auto twist = geometry_msgs::msg::Twist();
     geometry_msgs::msg::Twist twist;
-    if(lineX >= RobotRun.fMaxSpeed)
+    if (lineX >= RobotRun.fMaxSpeed)
         lineX = RobotRun.fMaxSpeed;
-    else if(lineX <= -RobotRun.fMaxSpeed)
+    else if (lineX <= -RobotRun.fMaxSpeed)
         lineX = -RobotRun.fMaxSpeed;
-    
-    if(angZ >= RobotRun.fMaxTurn)
+
+    if (angZ >= RobotRun.fMaxTurn)
         angZ = RobotRun.fMaxTurn;
-    else if(angZ <= -RobotRun.fMaxTurn)
+    else if (angZ <= -RobotRun.fMaxTurn)
         angZ = -RobotRun.fMaxTurn;
-    //auto twist = std::make_shared<Twist>();
+    // auto twist = std::make_shared<Twist>();
     twist.linear.x = lineX;
     twist.angular.z = angZ;
     twist_publisher_->publish(twist);
@@ -896,8 +915,9 @@ void RosMainNode::FindBall()
 /**********************************************************/
 
 /// @brief 旗帜处理函数 -- 语音
-/// @param strFlag 
-void RosMainNode::ProcessCamp(const std::string& strFlag) {
+/// @param strFlag
+void RosMainNode::ProcessCamp(const std::string &strFlag)
+{
     std::map<std::string, std::string> campMessages = {
         {"cavalryCamp", "到达骑兵营"},
         {"infantryCamp", "到达步兵营"},
@@ -908,18 +928,21 @@ void RosMainNode::ProcessCamp(const std::string& strFlag) {
     {
         if (strFlag == "cavalryCamp" && !CampFlags.cavalryCampArrived)
         {
+            cout << "骑兵营已到达" << endl;
             CampFlags.cavalryCampArrived = true;
             RobotCount.nFlagCount++;
             Speak(it->second);
         }
-        else if (strFlag == "infantryCamp" && !CampFlags.infantryCampArrived)
+        if (strFlag == "infantryCamp" && !CampFlags.infantryCampArrived)
         {
+            cout << "步兵营已到达" << endl;
             CampFlags.infantryCampArrived = true;
             RobotCount.nFlagCount++;
             Speak(it->second);
         }
-        else if (strFlag == "tankCamp" && !CampFlags.tankCampArrived)
+        if (strFlag == "tankCamp" && !CampFlags.tankCampArrived)
         {
+            cout << "战车营已到达" << endl;
             CampFlags.tankCampArrived = true;
             RobotCount.nFlagCount++;
             Speak(it->second);
@@ -929,23 +952,22 @@ void RosMainNode::ProcessCamp(const std::string& strFlag) {
 
 void RosMainNode::CalcPID()
 {
-
 }
 /// @brief PID-Kp参数更新
-/// @param error 
-/// @param absmin 
-/// @param absmax 
+/// @param error
+/// @param absmin
+/// @param absmax
 /// @return Kp参数
 // ! 未进行弯道和直道判断 考虑最小二乘法
 // TODO 优化该函数
-float RosMainNode::Update_kp_Speed(int error,int absmin, int absmax)
+float RosMainNode::Update_kp_Speed(int error, int absmin, int absmax)
 {
     if (abs(error) < absmin)
-        return PIDControl.kp1;// 直道
+        return PIDControl.kp1; // 直道
     else if (abs(error) > absmax)
-        return PIDControl.kp1;// 弯道
+        return PIDControl.kp1; // 弯道
     else
-        return PIDControl.kp1;//默认
+        return PIDControl.kp1; // 默认
 }
 /**********************************************************/
 /*                       主函数                            */

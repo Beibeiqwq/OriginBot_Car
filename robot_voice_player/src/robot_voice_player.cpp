@@ -25,6 +25,7 @@ private:
     void voiceCallback(const std_msgs::msg::String::SharedPtr msg)
     {
         std::string command = msg->data;
+        std::cout << "commmand is: " << command << std::endl;
 
         // 检查是否有对应的音频文件
         if (sound_files_.find(command) != sound_files_.end())
