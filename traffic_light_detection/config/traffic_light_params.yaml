@@ -1,0 +1,16 @@
+traffic_light_detection_node:
+  ros__parameters:
+    lower_red_hue: 0
+    upper_red_hue: 10
+    lower_red_saturation: 120
+    upper_red_saturation: 255
+    lower_red_value: 100
+    upper_red_value: 255
+
+    lower_green_hue: 60
+    upper_green_hue: 179
+    lower_green_saturation: 150
+    upper_green_saturation: 255
+    lower_green_value: 60
+    upper_green_value: 255
+
