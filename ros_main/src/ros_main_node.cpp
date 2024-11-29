@@ -116,6 +116,18 @@ public:
         CvThreshold.lower_red_ = cv::Scalar(0, 180, 200);
         CvThreshold.upper_red_ = cv::Scalar(179, 255, 255);
 
+        CvThreshold.lower_gray_ = cv::Scalar(0, 0, 14);
+        CvThreshold.upper_gray_ = cv::Scalar(179, 100, 41);
+
+        CvThreshold.lower_yellow_ = cv::Scalar(13, 255, 65);
+        CvThreshold.upper_yellow_ = cv::Scalar(40, 255, 255);
+
+        CvThreshold.lower_blue_ = cv::Scalar(100, 220, 55);
+        CvThreshold.upper_blue_ = cv::Scalar(124, 255, 255);
+
+        CvThreshold.lower_green_ = cv::Scalar(53, 163, 30);
+        CvThreshold.upper_green_ = cv::Scalar(78, 255, 255);
+
         // * PID参数
         // TODO 考虑修正 改为参数导入
         PIDControl.kp1 = 0.011;
@@ -243,8 +255,20 @@ private:
     };
     struct StructCvThreshold
     {
-        cv::Scalar lower_red_ = cv::Scalar(0, 180, 200);   // 最小的红色
-        cv::Scalar upper_red_ = cv::Scalar(179, 255, 255); // 最大的红色
+        cv::Scalar lower_red_ = cv::Scalar(0, 180, 200);    // 最小的红色
+        cv::Scalar upper_red_ = cv::Scalar(179, 255, 255);  // 最大的红色
+
+        cv::Scalar lower_yellow_ = cv::Scalar(13, 255, 65); // 黄色的下界
+        cv::Scalar upper_yellow_ = cv::Scalar(40, 255, 255); // 黄色的上界
+
+        cv::Scalar lower_gray_ = cv::Scalar(0, 0, 14);     // 灰色的下界
+        cv::Scalar upper_gray_ = cv::Scalar(179, 100, 41);  // 灰色的上界
+
+        cv::Scalar lower_blue_ = cv::Scalar(100, 220, 55);
+        cv::Scalar upper_blue_ = cv::Scalar(124, 255, 255);
+
+        cv::Scalar lower_green_ = cv::Scalar(53, 163, 30);
+        cv::Scalar upper_green_ = cv::Scalar(78, 255, 255);
     };
     struct StructPIDControl
     {
@@ -464,7 +488,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         imshow("RGB", imgOriginal);
         cv::waitKey(5);
 #endif
-// ! 此部分效果不好 注释
+        // ! 此部分效果不好 注释
         // // 查找轮廓
         // std::vector<std::vector<cv::Point>> contours;
         // cv::findContours(mask, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
@@ -548,34 +572,32 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         // * 第0行的中线从中间开始（假设为列数的一半）
         middle[rows] = cols / 2; // == 320
         auto_middle[rows] = cols / 2;
-        for (int y = rows-1; y >= int(rows*rows_area); --y)
+        for (int y = rows - 1; y >= int(rows * rows_area); --y)
         {
             int leftBoundary = -1, rightBoundary = -1;
             // * 使用上一行的中线位置来决定当前行的扫描起点
-            int startX = middle[y+1];
+            int startX = middle[y + 1];
             // cout << "startX: " << startX << endl;
             // * 向左扫描，寻找左边界
             for (int z = startX; z > 2; --z)
             {
                 uchar pixel = binary.at<uchar>(y, z);
-                if ((pixel == 255 && binary.at<uchar>(y, z - 1) == 0 && binary.at<uchar>(y, z - 2) == 0)
-                || z == 3)
+                if ((pixel == 255 && binary.at<uchar>(y, z - 1) == 0 && binary.at<uchar>(y, z - 2) == 0) || z == 3)
                 {
                     leftBoundary = z;
-                    //cout << "leftBoundary: " << leftBoundary << endl;
+                    // cout << "leftBoundary: " << leftBoundary << endl;
                     break;
                 }
             }
 
             // * 向右扫描，寻找右边界
-            for (int x = startX; x < cols -2 ; ++x)
+            for (int x = startX; x < cols - 2; ++x)
             {
                 uchar pixel = binary.at<uchar>(y, x);
-                if ((pixel == 255 && binary.at<uchar>(y, x + 1) == 0 && binary.at<uchar>(y, x + 2) == 0)
-                || x == cols - 3)
+                if ((pixel == 255 && binary.at<uchar>(y, x + 1) == 0 && binary.at<uchar>(y, x + 2) == 0) || x == cols - 3)
                 {
                     rightBoundary = x;
-                    //cout << "rightBoundary: " << rightBoundary << endl;
+                    // cout << "rightBoundary: " << rightBoundary << endl;
                     break;
                 }
             }
@@ -589,7 +611,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 // TODO 考虑修改为参数导入
                 auto_middle[y] = middle[y] - 10;
             }
-
+            // ! 画线函数 帧率过低 废弃
             // if (leftBoundary != -1)
             // {
             //     circle(cv_ptr->image, Point(leftBoundary, y), 1, Scalar(0, 255, 0), -1); // 半径为1的绿色像素点
@@ -608,27 +630,27 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             // waitKey(1);
         }
 #ifdef Desktop
-        // 遍历所有行，画出边界和中线
-        for (int y = rows; y > rows*rows_area ; --y)
+        // * 遍历所有行，画出边界和中线
+        for (int y = rows; y > rows * rows_area; --y)
         {
-            // 画左边界圆
+            // 画左边界
             if (leftBoundaries[y] != -1)
             {
-                circle(cv_ptr->image, Point(leftBoundaries[y], y), 2, Scalar(0, 255, 0), -1); 
+                circle(cv_ptr->image, Point(leftBoundaries[y], y), 2, Scalar(0, 255, 0), -1);
             }
 
-            // 画右边界圆
+            // 画右边界
             if (rightBoundaries[y] != -1)
             {
-                circle(cv_ptr->image, Point(rightBoundaries[y], y), 2, Scalar(0, 255, 0), -1); 
+                circle(cv_ptr->image, Point(rightBoundaries[y], y), 2, Scalar(0, 255, 0), -1);
             }
 
-            // 画中线圆
+            // 画中线
             if (middle[y] != 0)
             {
-                circle(cv_ptr->image, Point(middle[y], y), 2, Scalar(0, 0, 255), -1); 
+                circle(cv_ptr->image, Point(middle[y], y), 2, Scalar(0, 0, 255), -1);
             }
-            cv::line(cv_ptr->image, cv::Point(cols/2, 0), cv::Point(cols/2, rows), cv::Scalar(255, 0, 0), 1);
+            cv::line(cv_ptr->image, cv::Point(cols / 2, 0), cv::Point(cols / 2, rows), cv::Scalar(255, 0, 0), 1);
             cv::line(cv_ptr->image, cv::Point(0, 300), cv::Point(cols, 300), cv::Scalar(255, 0, 0), 1);
         }
 
@@ -644,9 +666,9 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         PIDControl.error = middle_offset;
         float speedX = 0.24;
         float speedZ = 0;
-        float auto_kp = Update_kp_Speed(PIDControl.error,20,110);
-        //float auto_kp = PIDControl.kp1;
-        RCLCPP_INFO(this->get_logger(),"Middle Offset: %d", middle_offset);
+        float auto_kp = Update_kp_Speed(PIDControl.error, 20, 110);
+        // float auto_kp = PIDControl.kp1;
+        RCLCPP_INFO(this->get_logger(), "Middle Offset: %d", middle_offset);
         // * 转向逻辑
         // ? 好像两个if的功能一样 考虑替换为 != 0
         if (middle_offset > 0)
@@ -654,7 +676,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             speedZ = PIDControl.error * auto_kp +
                      (PIDControl.error - PIDControl.last_error) * PIDControl.kd1;
 #ifdef DEBUG
-            //RCLCPP_INFO(this->get_logger(), "偏移向左，小车向右转");
+            // RCLCPP_INFO(this->get_logger(), "偏移向左，小车向右转");
             cout << "speedZ: " << speedZ << endl;
 #endif
             SetSpeed(speedX, -speedZ);
@@ -664,7 +686,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             speedZ = PIDControl.error * auto_kp +
                      (PIDControl.error - PIDControl.last_error) * PIDControl.kd1;
 #ifdef DEBUG
-            //RCLCPP_INFO(this->get_logger(), "偏移向右，小车向左转");
+            // RCLCPP_INFO(this->get_logger(), "偏移向右，小车向左转");
             cout << "speedZ:" << speedZ << endl;
 #endif
             SetSpeed(speedX, -speedZ);
@@ -679,6 +701,130 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         }
         // * 更新上一次的误差
         PIDControl.last_error = PIDControl.error;
+
+        // * 旗帜判断
+        cv::Mat hsv_flag;
+        cvtColor(cv_ptr->image, hsv_flag, COLOR_BGR2HSV);
+
+        // * 使用黄色范围进行颜色过滤
+        Mat yellow_mask;
+        inRange(hsv_flag, CvThreshold.lower_yellow_, CvThreshold.upper_yellow_, yellow_mask);
+
+        // * 查找黄色区域的轮廓
+        vector<vector<Point>> contours;
+        findContours(yellow_mask, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+        int min_block_width = 20;
+        int min_block_height = 20;
+        int gray_pixel_threshold = 100;
+        int surrounding_area_margin = 30;
+        // * 遍历找到的轮廓
+        for (size_t i = 0; i < contours.size(); i++)
+        {
+            // 获取矩形边界框
+            Rect bounding_rect = boundingRect(contours[i]);
+
+            // 过滤掉小的黄色色块
+            if (bounding_rect.width < min_block_width || bounding_rect.height < min_block_height)
+            {
+                continue; // 如果黄色色块太小，则跳过
+            }
+
+            // 在图像上画出黄色区域的边界框
+            rectangle(cv_ptr->image, bounding_rect, Scalar(0, 255, 0), 2);
+
+            // 在黄色区域周围扩展区域进行灰色检测
+            Rect surrounding_area(
+                max(0, bounding_rect.x - surrounding_area_margin),
+                max(0, bounding_rect.y - surrounding_area_margin),
+                min(cv_ptr->image.cols, bounding_rect.width + 2 * surrounding_area_margin),
+                min(cv_ptr->image.rows, bounding_rect.height + 2 * surrounding_area_margin));
+
+            // 提取周围区域
+            surrounding_area &= Rect(0, 0, cv_ptr->image.cols, cv_ptr->image.rows);
+            Mat surrounding_roi = cv_ptr->image(surrounding_area);
+
+            // 转换为HSV色彩空间
+            Mat hsv_surrounding;
+            cvtColor(surrounding_roi, hsv_surrounding, COLOR_BGR2HSV);
+
+            // * 1. 识别灰色区域
+            Mat gray_mask;
+            inRange(hsv_surrounding, CvThreshold.lower_gray_, CvThreshold.upper_gray_, gray_mask);
+
+            // 统计灰色像素点的数量
+            int gray_pixel_count = countNonZero(gray_mask);
+
+            // 如果灰色像素点数目超过阈值，说明附近有灰色区域
+            if (gray_pixel_count > gray_pixel_threshold)
+            {
+                // 在图像上标记灰色区域
+                for (int y = 0; y < gray_mask.rows; y++)
+                {
+                    for (int x = 0; x < gray_mask.cols; x++)
+                    {
+                        if (gray_mask.at<uchar>(y, x) > 0)
+                        {
+                            // 在图像上绘制灰色区域的像素点
+                            circle(cv_ptr->image, Point(surrounding_area.x + x, surrounding_area.y + y), 1, Scalar(255, 0, 0), -1);
+                        }
+                    }
+                }
+
+                // 输出信息，表示检测到灰色区域
+                RCLCPP_INFO(this->get_logger(), "Detected gray area near yellow block with %d gray pixels.", gray_pixel_count);
+            }
+            // * 2. 识别绿色区域
+            Mat green_mask;
+            Scalar green_lower = CvThreshold.lower_green_;   // 绿色HSV下限
+            Scalar green_upper = CvThreshold.upper_green_; // 绿色HSV上限
+            inRange(hsv_surrounding, green_lower, green_upper, green_mask);
+            int green_pixel_count = countNonZero(green_mask);
+            int green_pixel_threshold = 100;
+            // 如果绿色像素点数目超过阈值，说明附近有绿色区域
+            if (green_pixel_count > green_pixel_threshold)
+            {
+                // 在图像上标记绿色区域
+                for (int y = 0; y < green_mask.rows; y++)
+                {
+                    for (int x = 0; x < green_mask.cols; x++)
+                    {
+                        if (green_mask.at<uchar>(y, x) > 0)
+                        {
+                            circle(cv_ptr->image, Point(surrounding_area.x + x, surrounding_area.y + y), 1, Scalar(0, 255, 0), -1);
+                        }
+                    }
+                }
+                RCLCPP_INFO(this->get_logger(), "Detected green area near yellow block with %d green pixels.", green_pixel_count);
+            }
+
+            // * 3. 识别蓝色区域
+            Mat blue_mask;
+            Scalar blue_lower = CvThreshold.lower_blue_;   // 蓝色HSV下限
+            Scalar blue_upper = CvThreshold.upper_blue_; // 蓝色HSV上限
+            inRange(hsv_surrounding, blue_lower, blue_upper, blue_mask);
+            int blue_pixel_count = countNonZero(blue_mask);
+            int blue_pixel_threshold = 100;
+            // 如果蓝色像素点数目超过阈值，说明附近有蓝色区域
+            if (blue_pixel_count > blue_pixel_threshold)
+            {
+                // 在图像上标记蓝色区域
+                for (int y = 0; y < blue_mask.rows; y++)
+                {
+                    for (int x = 0; x < blue_mask.cols; x++)
+                    {
+                        if (blue_mask.at<uchar>(y, x) > 0)
+                        {
+                            circle(cv_ptr->image, Point(surrounding_area.x + x, surrounding_area.y + y), 1, Scalar(0, 0, 255), -1);
+                        }
+                    }
+                }
+                RCLCPP_INFO(this->get_logger(), "Detected blue area near yellow block with %d blue pixels.", blue_pixel_count);
+            }
+        }
+
+        // 显示处理后的图像
+        imshow("Detected Image", cv_ptr->image);
+        waitKey(1); // 每1ms刷新一次显示
     }
 }
 /**********************************************************/
