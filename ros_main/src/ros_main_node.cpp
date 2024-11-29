@@ -200,6 +200,7 @@ private:
             state_ = STATE_FIND_BALL;
             break;
         case STATE_FIND_BALL:
+            // TODO 寻球逻辑 等待编写
             if(!RobotFlags.bBallFound)
             {
                 FindBall(); //未编写
@@ -350,20 +351,21 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
     if (ImageState_ == IMAGE_STATE_FIND_BALL)
     {
 
-        // 将图像转换为 HSV 色彩空间
+        // * 将图像转换为 HSV 色彩空间
         cv::Mat imgOriginal = cv_ptr->image;
         cv::Mat hsv_image;
         cv::cvtColor(cv_ptr->image, hsv_image, cv::COLOR_BGR2HSV);
-
+        // ! 直方图均衡化 效果不好注释
         // vector<cv::Mat> hsvSplit;
         // split(hsv_image, hsvSplit);
         // equalizeHist(hsvSplit[2], hsvSplit[2]);
         // merge(hsvSplit, hsv_image);
 
-        // 阈值操作，获取红色区域
+        // * 阈值操作，获取红色区域
         cv::Mat mask;
         cv::inRange(hsv_image, CvThreshold.lower_red_, CvThreshold.upper_red_, mask);
 
+        // ! 图像开闭运算 效果不好注释
         // cv::Mat element = getStructuringElement(MORPH_RECT, Size(5, 5));
         // morphologyEx(mask, mask, MORPH_OPEN, element);
         // morphologyEx(mask, mask, MORPH_CLOSE, element);
@@ -373,6 +375,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         int nPixCount = 0;
         int nImgWidth = mask.cols;
         int nImgHeight = mask.rows;
+        // * 遍历图像找到红色像素点
         for (int y = 0; y < nImgHeight; y++)
         {
             for (int x = 0; x < nImgWidth; x++)
@@ -388,11 +391,12 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         geometry_msgs::msg::Twist vel_cmd;
         float fVelFoward = 0;
         float fVelTurn = 0;
+        // * 红色像素点阈值 > 200进入跟随
+        // TODO 考虑修改为常量或参数
         if (nPixCount > 200)
         {
             nTargetX /= nPixCount;
             nTargetY /= nPixCount;
-            printf("Target (%d, %d) PixelCount = %d\n", nTargetX, nTargetY, nPixCount);
 #ifdef Desktop
             Point line_begin = Point(nTargetX - 10, nTargetY);
             Point line_end = Point(nTargetX + 10, nTargetY);
@@ -406,6 +410,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             fVelFoward = (nImgHeight / 2 - nTargetY) * 0.002;
             fVelTurn = (nImgWidth / 2 - nTargetX) * 0.003;
 #ifdef DEBUG
+            printf("Target (%d, %d) PixelCount = %d\n", nTargetX, nTargetY, nPixCount);
             printf("fVelFoward:%f  nImgHeight / 2 = %d", fVelFoward, nImgHeight / 2);
             printf("fVelTurn:%f   nImgWidth /2 = %d", fVelTurn, nImgWidth / 2);
 #endif
@@ -435,6 +440,9 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         }
         else
         {
+            // * 进入else则停车
+            // ! 此部分逻辑不够完善 没有找红球的行为
+            // TODO 添加寻找红球行为
             // FindBall(); 记录下上一次的转向速度 寻找小球的方向
             RobotFlags.bBallFound = false;
 #ifdef DEBUG
@@ -448,14 +456,15 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             // vel_cmd.angular.z = 0;
             fVelFoward = 0;
             fVelTurn = 0;
+            SetSpeed(fVelFoward, fVelTurn);
         }
-        SetSpeed(fVelFoward, fVelTurn);
         // twist_publisher_->publish(vel_cmd);
 #ifdef Desktop
         imshow("Result", mask);
         imshow("RGB", imgOriginal);
         cv::waitKey(5);
 #endif
+// ! 此部分效果不好 注释
         // // 查找轮廓
         // std::vector<std::vector<cv::Point>> contours;
         // cv::findContours(mask, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
@@ -497,16 +506,16 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
     if (ImageState_ == IMAGE_STATE_FOLLOW_LINE)
     {
-        // 动态阈值二值化
+        // * 动态阈值二值化
         cv::Mat gray;
         cv::cvtColor(cv_ptr->image, gray, cv::COLOR_BGR2GRAY);
-        // 高斯滤波
+        // * 高斯滤波
         GaussianBlur(gray, gray, Size(5, 5), 0);
-        // 使用大津法进行二值化
+        // * 使用大津法进行二值化
         cv::Mat binary;
         cv::threshold(gray, binary, 0, 255, cv::THRESH_BINARY + cv::THRESH_OTSU);
 
-        // 显示二值化结果
+        // * 显示二值化结果
 #ifdef Desktop
         cv::imshow("Binary Image", binary);
         cv::waitKey(1); // 这一步很重要，保持 OpenCV 窗口更新
@@ -530,22 +539,22 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         //     }
         // }
 
-        // 存储每一行的中线位置
+        // * 存储每一行的中线位置
         vector<int> leftBoundaries(rows, -1);
         vector<int> rightBoundaries(rows, -1);
         vector<int> middle(rows, 0);
         vector<int> auto_middle(rows, 0);
         float rows_area = 0.35;
-        // 第0行的中线从中间开始（假设为列数的一半）
+        // * 第0行的中线从中间开始（假设为列数的一半）
         middle[rows] = cols / 2; // == 320
         auto_middle[rows] = cols / 2;
         for (int y = rows-1; y >= int(rows*rows_area); --y)
         {
             int leftBoundary = -1, rightBoundary = -1;
-            // 使用上一行的中线位置来决定当前行的扫描起点
+            // * 使用上一行的中线位置来决定当前行的扫描起点
             int startX = middle[y+1];
             // cout << "startX: " << startX << endl;
-            // 向左扫描，寻找左边界
+            // * 向左扫描，寻找左边界
             for (int z = startX; z > 2; --z)
             {
                 uchar pixel = binary.at<uchar>(y, z);
@@ -558,7 +567,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 }
             }
 
-            // 向右扫描，寻找右边界
+            // * 向右扫描，寻找右边界
             for (int x = startX; x < cols -2 ; ++x)
             {
                 uchar pixel = binary.at<uchar>(y, x);
@@ -572,10 +581,12 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             }
             leftBoundaries[y] = leftBoundary;
             rightBoundaries[y] = rightBoundary;
-            // 记录当前行的中线，作为下一行的起点
+            // * 记录当前行的中线，作为下一行的起点
             if (leftBoundary != -1 && rightBoundary != -1)
             {
                 middle[y] = (leftBoundary + rightBoundary) / 2;
+                // ! 此处auto_middle[y] 为摄像头相对图像中线的偏移
+                // TODO 考虑修改为参数导入
                 auto_middle[y] = middle[y] - 10;
             }
 
@@ -627,7 +638,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         waitKey(1);
 #endif
 
-        // 获取中线位置，并计算偏移量
+        // * 获取中线位置，并计算偏移量
         int middle_x = auto_middle[300];
         int middle_offset = middle_x - cols / 2;
         PIDControl.error = middle_offset;
@@ -636,9 +647,10 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         float auto_kp = Update_kp_Speed(PIDControl.error,20,110);
         //float auto_kp = PIDControl.kp1;
         RCLCPP_INFO(this->get_logger(),"Middle Offset: %d", middle_offset);
+        // * 转向逻辑
+        // ? 好像两个if的功能一样 考虑替换为 != 0
         if (middle_offset > 0)
         {
-            // 偏移向左，小车向右转
             speedZ = PIDControl.error * auto_kp +
                      (PIDControl.error - PIDControl.last_error) * PIDControl.kd1;
 #ifdef DEBUG
@@ -649,7 +661,6 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         }
         else if (middle_offset < 0)
         {
-            // 偏移向右，小车向左转
             speedZ = PIDControl.error * auto_kp +
                      (PIDControl.error - PIDControl.last_error) * PIDControl.kd1;
 #ifdef DEBUG
@@ -666,12 +677,16 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 #endif
             SetSpeed(speedX, 0);
         }
+        // * 更新上一次的误差
         PIDControl.last_error = PIDControl.error;
     }
 }
 /**********************************************************/
 /*                     机器功能函数                         */
 /**********************************************************/
+
+/// @brief 机器说话
+/// @param strToSpeak 
 void RosMainNode::Speak(std::string strToSpeak)
 {
     std_msgs::msg::String voice_msg;
