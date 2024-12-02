@@ -1,4 +1,5 @@
 #include "rclcpp/rclcpp.hpp"
+#include "ai_msgs/msg/perception_targets.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "sensor_msgs/msg/image.hpp"
@@ -15,9 +16,9 @@
 #include <algorithm>
 #include <vector>
 
-// #define Desktop
-//#define DEBUG
-
+//#define Desktop
+#define DEBUG
+//#define FLAG // ! 效果过差 改用Yolo
 using namespace std;
 using namespace cv;
 
@@ -59,7 +60,7 @@ public:
             });
 
         image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "/image_raw", 10,
+            "/camera1_ns/image_raw", 10,
             [this](const sensor_msgs::msg::Image::SharedPtr msg)
             {
                 // * 图像回调
@@ -81,6 +82,14 @@ public:
             {
                 // * 状态机
                 timerCallback();
+            });
+        
+        yolo_sub_ = this->create_subscription<ai_msgs::msg::PerceptionTargets>(
+            "hobot_dnn_detection", 10,
+            [this](const ai_msgs::msg::PerceptionTargets::SharedPtr msg)
+            {
+                // * Yolo回调
+                yoloCallback(msg);
             });
 
         robot_voice_pub_ = this->create_publisher<std_msgs::msg::String>("/robotvoice", 10);
@@ -113,31 +122,22 @@ public:
         RobotCount.nFlagCount = 0;
         RobotCount.nStartCount = 0;
 
-        // * 红球颜色阈值
-        // TODO 考虑修改变量名 改为参数导入？
-        CvThreshold.lower_red_ = cv::Scalar(0, 180, 200);
-        CvThreshold.upper_red_ = cv::Scalar(179, 255, 255);
-        // ! 灰色阈值
-        CvThreshold.lower_gray_ = cv::Scalar(0, 0, 130);
-        CvThreshold.upper_gray_ = cv::Scalar(20, 95, 212);
-
-        CvThreshold.lower_yellow_ = cv::Scalar(18, 125, 210);
-        CvThreshold.upper_yellow_ = cv::Scalar(55, 255, 255);
-
-        CvThreshold.lower_blue_ = cv::Scalar(100, 45, 46);
-        CvThreshold.upper_blue_ = cv::Scalar(124, 255, 255);
-
-        CvThreshold.lower_green_ = cv::Scalar(39, 90, 46);
-        CvThreshold.upper_green_ = cv::Scalar(75, 255, 255);
+                        
 
         // * PID参数
         // TODO 考虑修正 改为参数导入
+        PIDControl.kp = 0.005;
+        PIDControl.ki = 0.0;
+        PIDControl.kd = 0.0;
+        // * 弯道PID
         PIDControl.kp1 = 0.011;
         PIDControl.ki1 = 0.0;
         PIDControl.kd1 = 0.003;
+        // * 直道PID
         PIDControl.kp2 = 0.002;
         PIDControl.ki2 = 0.0;
         PIDControl.kd2 = 0.002;
+
         PIDControl.error = 0;
         PIDControl.last_error = 0;
 
@@ -186,19 +186,7 @@ private:
             // * 弯道避障赛道
             // ! 此处应调整为弯道PID 等待过弯
             // * 识别到粮仓旗帜后 进入找球行为
-            SetSpeed(0.4, 0); // 此处Speed由图像回调控制 等待修复
-            if (RobotRun.bTurnLeft == true)
-            {
-                SetSpeed(0, 0.4);
-            }
-            else if (RobotRun.bTurnRight == true)
-            {
-                SetSpeed(0, -0.4);
-            }
-            else
-            {
-                SetSpeed(0.4, 0);
-            }
+
             // * 找到粮仓后 状态切换
             if (RobotFlags.bgranaryFound == true)
             {
@@ -218,6 +206,7 @@ private:
             break;
         case STATE_FIND_BALL:
             // TODO 寻球逻辑 等待编写
+            ImageState_ = IMAGE_STATE_FIND_BALL;
             if (!RobotFlags.bBallFound)
             {
                 FindBall(); // 未编写
@@ -271,17 +260,24 @@ private:
         cv::Scalar lower_yellow_ = cv::Scalar(13, 255, 65);  // 黄色的下界
         cv::Scalar upper_yellow_ = cv::Scalar(40, 255, 255); // 黄色的上界
 
-        cv::Scalar lower_gray_ = cv::Scalar(110, 0, 0);     // 灰色的下界
-        cv::Scalar upper_gray_ = cv::Scalar(179, 100, 110); // 灰色的上界
+        cv::Scalar lower_gray_ = cv::Scalar(0, 0, 110);     // 灰色的下界
+        cv::Scalar upper_gray_ = cv::Scalar(179, 110, 148); // 灰色的上界
 
         cv::Scalar lower_blue_ = cv::Scalar(100, 220, 55);
         cv::Scalar upper_blue_ = cv::Scalar(124, 255, 255);
 
         cv::Scalar lower_green_ = cv::Scalar(53, 163, 30);
         cv::Scalar upper_green_ = cv::Scalar(78, 255, 255);
+
+        cv::Scalar Ball_lower = cv::Scalar(0,43,46);
+        cv::Scalar Ball_upper = cv::Scalar(6,255,255);
     };
     struct StructPIDControl
     {
+        float kp;
+        float ki;
+        float kd;
+
         float kp1;
         float ki1;
         float kd1;
@@ -309,6 +305,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr start_detect_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+    rclcpp::Subscription<ai_msgs::msg::PerceptionTargets>::SharedPtr yolo_sub_;
 
     // * 发布器
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twist_publisher_;
@@ -321,6 +318,7 @@ private:
     void startDetectCallback(const std_msgs::msg::String::SharedPtr msg);
     void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
     void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
+    void yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr msg);
 
     // * 功能函数
     void Speak(std::string strToSpeak);
@@ -329,7 +327,7 @@ private:
     void FindBall();
     // * 程序功能函数
     void ProcessCamp(const std::string &strFlag);
-    void CalcPID();
+    void PID_Choose(int cmd);
     float Update_kp_Speed(int error, int absmin, int absmax);
 };
 /**********************************************************/
@@ -349,6 +347,39 @@ void RosMainNode::startDetectCallback(const std_msgs::msg::String::SharedPtr msg
     else
     {
         RobotCount.nStartCount = 0;
+    }
+}
+
+void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr msg)
+{
+    // 遍历所有目标对象并输出相关信息
+    for (size_t num = 0; num < msg->targets.size(); ++num)
+    {
+        const auto &target = msg->targets[num];
+        const auto &roi = target.rois[0].rect;
+        const auto area = roi.height * roi.width;
+        if (state_ == STATE_STRAIGHT)
+        {
+            if (area > 16000)
+            {
+                RobotFlags.bFlagFound = true;
+                strFlag = target.rois[0].type;
+            }
+        }
+        if(state_ == STATE_ROTATE)
+        {
+            if(area > 16000)
+            {
+                RobotFlags.bgranaryFound = true;
+            }
+        }
+        RCLCPP_INFO(this->get_logger(),
+                    "Target %zu: Type: %s, height=%d, width=%d, conf=%.2f",
+                    num,
+                    target.rois[0].type.c_str(),
+                    roi.height,
+                    roi.width,
+                    target.rois[0].confidence);
     }
 }
 
@@ -394,7 +425,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
         // * 阈值操作，获取红色区域
         cv::Mat mask;
-        cv::inRange(hsv_image, CvThreshold.lower_red_, CvThreshold.upper_red_, mask);
+        cv::inRange(hsv_image, CvThreshold.Ball_lower, CvThreshold.Ball_upper, mask);
 
         // ! 图像开闭运算 效果不好注释
         // cv::Mat element = getStructuringElement(MORPH_RECT, Size(5, 5));
@@ -586,10 +617,11 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             int startX = middle[y + 1];
             // cout << "startX: " << startX << endl;
             // * 向左扫描，寻找左边界
-            for (int z = startX; z > 2; --z)
+            for (int z = startX; z > 6; --z)
             {
                 uchar pixel = binary.at<uchar>(y, z);
-                if ((pixel == 255 && binary.at<uchar>(y, z - 1) == 0 && binary.at<uchar>(y, z - 2) == 0) || z == 3)
+                if ((pixel == 255 && binary.at<uchar>(y, z - 1) == 0 && binary.at<uchar>(y, z - 2) == 0) 
+                && binary.at<uchar>(y, z - 3) == 0 && binary.at<uchar>(y, z - 4) == 0 && binary.at<uchar>(y, z - 5) == 0 || z == 6)
                 {
                     leftBoundary = z;
                     // cout << "leftBoundary: " << leftBoundary << endl;
@@ -601,7 +633,8 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             for (int x = startX; x < cols - 2; ++x)
             {
                 uchar pixel = binary.at<uchar>(y, x);
-                if ((pixel == 255 && binary.at<uchar>(y, x + 1) == 0 && binary.at<uchar>(y, x + 2) == 0) || x == cols - 3)
+                if ((pixel == 255 && binary.at<uchar>(y, x + 1) == 0 && binary.at<uchar>(y, x + 2) == 0) 
+                && binary.at<uchar>(y, x + 3) == 0&& binary.at<uchar>(y, x + 4) == 0&& binary.at<uchar>(y, x + 5) == 0|| x == cols - 6)
                 {
                     rightBoundary = x;
                     // cout << "rightBoundary: " << rightBoundary << endl;
@@ -708,7 +741,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         }
         // * 更新上一次的误差
         PIDControl.last_error = PIDControl.error;
-
+#ifdef FLAG
         // * 旗帜判断
         cv::Mat hsv_flag;
         cvtColor(cv_ptr->image, hsv_flag, COLOR_BGR2HSV);
@@ -722,7 +755,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         findContours(yellow_mask, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
         int min_block_width = 20;
         int min_block_height = 20;
-        int gray_pixel_threshold = 4000;
+        int gray_pixel_threshold = 400;
         int surrounding_area_margin = 3;
         // * 遍历找到的轮廓
         for (size_t i = 0; i < contours.size(); i++)
@@ -770,6 +803,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 // * 找到战车营
                 RobotFlags.btankFound = true;
                 strFlag = "tankCamp";
+                #ifdef Desktop
                 // 在图像上标记灰色区域
                 for (int y = 0; y < gray_mask.rows; y++)
                 {
@@ -782,6 +816,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                         }
                     }
                 }
+                #endif
 
                 // 输出信息，表示检测到灰色区域
                // RCLCPP_INFO(this->get_logger(), "Detected gray area near yellow block with %d gray pixels.", gray_pixel_count);
@@ -792,7 +827,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             Scalar green_upper = CvThreshold.upper_green_; // 绿色HSV上限
             inRange(hsv_surrounding, green_lower, green_upper, green_mask);
             int green_pixel_count = countNonZero(green_mask);
-            int green_pixel_threshold = 3000;
+            int green_pixel_threshold = 300;
             // 如果绿色像素点数目超过阈值，说明附近有绿色区域
             if (green_pixel_count > green_pixel_threshold)
             {
@@ -800,6 +835,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 RobotFlags.binfantryFound = true;
                 strFlag = "infantryCamp";
                 // 在图像上标记绿色区域
+                #ifdef Desktop
                 for (int y = 0; y < green_mask.rows; y++)
                 {
                     for (int x = 0; x < green_mask.cols; x++)
@@ -810,6 +846,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                         }
                     }
                 }
+                #endif
                 //RCLCPP_INFO(this->get_logger(), "Detected green area near yellow block with %d green pixels.", green_pixel_count);
             }
 
@@ -819,7 +856,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             Scalar blue_upper = CvThreshold.upper_blue_; // 蓝色HSV上限
             inRange(hsv_surrounding, blue_lower, blue_upper, blue_mask);
             int blue_pixel_count = countNonZero(blue_mask);
-            int blue_pixel_threshold = 3000;
+            int blue_pixel_threshold = 300;
             // 如果蓝色像素点数目超过阈值，说明附近有蓝色区域
             if (blue_pixel_count > blue_pixel_threshold)
             {
@@ -827,6 +864,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 RobotFlags.bcavalryFound = true;
                 strFlag = "cavalryCamp";
                 // 在图像上标记蓝色区域
+                #ifdef Desktop
                 for (int y = 0; y < blue_mask.rows; y++)
                 {
                     for (int x = 0; x < blue_mask.cols; x++)
@@ -837,13 +875,15 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                         }
                     }
                 }
+                #endif
                 //RCLCPP_INFO(this->get_logger(), "Detected blue area near yellow block with %d blue pixels.", blue_pixel_count);
             }
         }
 
         // 显示处理后的图像
         imshow("Detected Image", cv_ptr->image);
-        waitKey(1); // 每1ms刷新一次显示
+        cv::waitKey(1); // 每1ms刷新一次显示
+        #endif
     }
 }
 /**********************************************************/
@@ -892,6 +932,7 @@ void RosMainNode::RobotCtl(const Twist &msg) const
 /// @brief 找球行为
 void RosMainNode::FindBall()
 {
+    cout << "进入找球行为" << endl;
     auto message = geometry_msgs::msg::Twist();
 
     if (RobotFlags.bBallFound == true)
@@ -901,8 +942,8 @@ void RosMainNode::FindBall()
     }
     else
     {
-        message.angular.z = 0.15;
-        message.linear.x = 0;
+        message.angular.z = 0;
+        message.linear.x = 0.15;
     }
     message.linear.y = 0.0;
     message.linear.z = 0.0;
@@ -919,40 +960,64 @@ void RosMainNode::FindBall()
 void RosMainNode::ProcessCamp(const std::string &strFlag)
 {
     std::map<std::string, std::string> campMessages = {
-        {"cavalryCamp", "到达骑兵营"},
-        {"infantryCamp", "到达步兵营"},
-        {"tankCamp", "到达战车营"}};
+        {"qibing", "到达骑兵营"},
+        {"bubing", "到达步兵营"},
+        {"zhanche", "到达战车营"},
+        {"han", "到达粮仓"},
+        {"chu", "到达粮仓"}};
 
     auto it = campMessages.find(strFlag);
     if (it != campMessages.end())
     {
-        if (strFlag == "cavalryCamp" && !CampFlags.cavalryCampArrived)
+        if (strFlag == "qibing" && !CampFlags.cavalryCampArrived)
         {
             cout << "骑兵营已到达" << endl;
             CampFlags.cavalryCampArrived = true;
             RobotCount.nFlagCount++;
             Speak(it->second);
         }
-        if (strFlag == "infantryCamp" && !CampFlags.infantryCampArrived)
+        if (strFlag == "bubing" && !CampFlags.infantryCampArrived)
         {
             cout << "步兵营已到达" << endl;
             CampFlags.infantryCampArrived = true;
             RobotCount.nFlagCount++;
             Speak(it->second);
         }
-        if (strFlag == "tankCamp" && !CampFlags.tankCampArrived)
+        if (strFlag == "zhanche" && !CampFlags.tankCampArrived)
         {
             cout << "战车营已到达" << endl;
             CampFlags.tankCampArrived = true;
             RobotCount.nFlagCount++;
             Speak(it->second);
         }
+        if((strFlag == "han" || strFlag == "chu") && state_ == STATE_ROTATE)
+        {
+            cout << "粮仓已到达" << endl;
+            Speak(it->second);
+            RobotFlags.bgranaryFound = true;
+
+        }
     }
 }
 
-void RosMainNode::CalcPID()
+void RosMainNode::PID_Choose(int cmd)
 {
+    if(cmd == 1)
+    {
+        PIDControl.kp = PIDControl.kp2;
+        PIDControl.ki = PIDControl.ki2; 
+        PIDControl.kd = PIDControl.kd2;
+        cout << "[PID]变更为直道PID参数" << endl;
+    }
+    else if(cmd == 2)
+    {
+        PIDControl.kp = PIDControl.kp1;
+        PIDControl.ki = PIDControl.ki1;
+        PIDControl.kd = PIDControl.kd1;
+        cout << "[PID]变更为弯道PID参数" << endl;
+    }
 }
+
 /// @brief PID-Kp参数更新
 /// @param error
 /// @param absmin
@@ -963,7 +1028,7 @@ void RosMainNode::CalcPID()
 float RosMainNode::Update_kp_Speed(int error, int absmin, int absmax)
 {
     if (abs(error) < absmin)
-        return PIDControl.kp1; // 直道
+        return 0; // 直道
     else if (abs(error) > absmax)
         return PIDControl.kp1; // 弯道
     else
