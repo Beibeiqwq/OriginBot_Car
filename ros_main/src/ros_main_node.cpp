@@ -1,5 +1,4 @@
 #include "rclcpp/rclcpp.hpp"
-#include "ai_msgs/msg/perception_targets.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "sensor_msgs/msg/image.hpp"
@@ -16,8 +15,15 @@
 #include <algorithm>
 #include <vector>
 
-//#define Desktop
+#define Desktop
+
+#ifndef Desktop
+#include "ai_msgs/msg/perception_targets.hpp"
+#endif
+
+
 #define DEBUG
+#define YOLO_DEBUG
 //#define FLAG // ! 效果过差 改用Yolo
 using namespace std;
 using namespace cv;
@@ -27,23 +33,24 @@ using geometry_msgs::msg::Twist;
 #ifndef M_PI
 #define M_PI 3.1415926535
 #endif
+
 /// @brief 程序状态
 enum StructRobotState
 {
-    STATE_WAIT_CMD,
-    STATE_WAIT_ENTER,
-    STATE_STRAIGHT,
-    STATE_ROTATE,
-    STATE_ARRIVE_GRANRAY,
-    STATE_FIND_BALL
+    STATE_WAIT_CMD,       // * 等待命令
+    STATE_WAIT_ENTER,     // * 等待红绿灯
+    STATE_STRAIGHT,       // * 直道赛道 -- 识别旗帜
+    STATE_ROTATE,         // * 弯道赛道 -- 识别障碍物 + 粮仓
+    STATE_ARRIVE_GRANRAY, // * 粮仓  -- 等待3s
+    STATE_FIND_BALL       // * 找红球 -- HSV
 };
 /// @brief 图像回调状态
 enum StructImageState
 {
-    IMAGE_STATE_WAIT,
-    IMAGE_STATE_FIND_FLAG,
-    IMAGE_STATE_FOLLOW_LINE,
-    IMAGE_STATE_FIND_BALL
+    IMAGE_STATE_WAIT,       // * 初始化
+    IMAGE_STATE_FIND_FLAG,  // * 找旗帜 || 直道赛道
+    IMAGE_STATE_FOLLOW_LINE,// * 弯道赛道 || 障碍物
+    IMAGE_STATE_FIND_BALL   // * 寻找红球
 };
 
 class RosMainNode : public rclcpp::Node
@@ -83,7 +90,7 @@ public:
                 // * 状态机
                 timerCallback();
             });
-        
+#ifndef Desktop
         yolo_sub_ = this->create_subscription<ai_msgs::msg::PerceptionTargets>(
             "hobot_dnn_detection", 10,
             [this](const ai_msgs::msg::PerceptionTargets::SharedPtr msg)
@@ -91,8 +98,10 @@ public:
                 // * Yolo回调
                 yoloCallback(msg);
             });
-
+#endif
+        // * 语音播放
         robot_voice_pub_ = this->create_publisher<std_msgs::msg::String>("/robotvoice", 10);
+        // * 速度发布
         twist_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
 
         // * 三个兵营的到达标志位
@@ -102,25 +111,28 @@ public:
 
         // * 机器运动控制节点
         // TODO 考虑修改为参数导入
-        RobotRun.bTurnLeft = false;
-        RobotRun.bTurnRight = false;
-        RobotRun.nTurnOffset = 0;
-        RobotRun.currentYaw = 0;
-        RobotRun.targetYaw = 0;
-        RobotRun.fMaxSpeed = 0.3;
-        RobotRun.fMaxTurn = 1.3;
+        // ! 惯导方案 废弃
+        // RobotRun.bTurnLeft = false;
+        // RobotRun.bTurnRight = false;
+        // RobotRun.nTurnOffset = 0;
+        // RobotRun.currentYaw = 0;
+        // RobotRun.targetYaw = 0;
+
+        RobotRun.fMaxSpeed = 0.3; // * 小车最大速度
+        RobotRun.fMaxTurn = 1.3;  // * 小车最大转向速度
 
         // * 机器识别标志位
-        RobotFlags.bBallFound = false;
-        RobotFlags.bFlagFound = false;
-        RobotFlags.bgranaryFound = false;
-        RobotFlags.bcavalryFound = false;
-        RobotFlags.bgranaryFound = false;
-        RobotFlags.btankFound = false;
+        RobotFlags.bBallFound = false; // * 找到红球 -- HSV
+        RobotFlags.bFlagFound = false; // * 找到旗帜 -- YOLOV5
+        // ! 废弃 改用yolo
+        // RobotFlags.bgranaryFound = false;
+        // RobotFlags.bcavalryFound = false;
+        // RobotFlags.bgranaryFound = false;
+        // RobotFlags.btankFound = false;
 
         // * 机器识别计数
-        RobotCount.nFlagCount = 0;
-        RobotCount.nStartCount = 0;
+        RobotCount.nFlagCount = 0; // * 旗帜计数 -- 语音识别函数中
+        RobotCount.nStartCount = 0; // * 红绿灯计数 -- 红绿灯回调
 
                         
 
@@ -167,14 +179,19 @@ private:
             // * 识别旗帜赛道
             // ! 此处应调整为直道PID 等待识别完成
             // TODO 识别到旗帜后，进入调整为弯道PID
+
+            // * 1.
+            ImageState_ = IMAGE_STATE_FOLLOW_LINE;
+
+            // * 2.
             if (RobotCount.nFlagCount == 3)
             {
                 state_ = STATE_ROTATE;
                 RCLCPP_INFO(this->get_logger(), "State changed to STATE_ROTATE.");
                 break;
             }
-            // 此处SetSpeed由图像回调控制 等待修复
-            //SetSpeed(0.24, 0);
+
+            // * 3.
             if (RobotFlags.bFlagFound)
             {
                 //SetSpeed(0.24, 0);
@@ -187,7 +204,11 @@ private:
             // ! 此处应调整为弯道PID 等待过弯
             // * 识别到粮仓旗帜后 进入找球行为
 
+            // * 1.
+            ImageState_ = IMAGE_STATE_FOLLOW_LINE;
+
             // * 找到粮仓后 状态切换
+            // * 2.
             if (RobotFlags.bgranaryFound == true)
             {
                 state_ = STATE_ARRIVE_GRANRAY;
@@ -199,9 +220,14 @@ private:
             // * 播报后停止四秒 寻找球
             // ! 回调函数也得停止
             // TODO 等待添加回调函数位
-            Speak("到达粮仓");
+
+            // * 1. Reset
             SetSpeed(0, 0);
+            state_ = STATE_WAIT_CMD;
+            ImageState_ = IMAGE_STATE_WAIT;
             std::this_thread::sleep_for(std::chrono::seconds(4));
+
+            // * 2. Set
             state_ = STATE_FIND_BALL;
             break;
         case STATE_FIND_BALL:
@@ -219,10 +245,10 @@ private:
 
     struct StructCampFlags
     {
-        bool cavalryCampArrived = false;  // 骑兵营
-        bool infantryCampArrived = false; // 步兵营
-        bool tankCampArrived = false;     // 战车营
-        bool granaryArrived = false;      // 粮仓
+        bool cavalryCampArrived = false;  // *骑兵营
+        bool infantryCampArrived = false; // *步兵营
+        bool tankCampArrived = false;     // *战车营
+        bool granaryArrived = false;      // *粮仓
     };
     struct StructRobotRun
     {
@@ -242,10 +268,10 @@ private:
         bool bBallFound = false;
         bool bFlagFound = false;
 
-        bool bgranaryFound = false;  // 粮仓
-        bool bcavalryFound = false;  // 骑兵营
-        bool binfantryFound = false; // 步兵营
-        bool btankFound = false;     // 战车营
+        bool bgranaryFound = false;  // *粮仓
+        bool bcavalryFound = false;  // *骑兵营
+        bool binfantryFound = false; // *步兵营
+        bool btankFound = false;     // *战车营
     };
     struct StructRobotCount
     {
@@ -254,6 +280,7 @@ private:
     };
     struct StructCvThreshold
     {
+#ifdef FLAG
         cv::Scalar lower_red_ = cv::Scalar(0, 180, 200);   // 最小的红色
         cv::Scalar upper_red_ = cv::Scalar(179, 255, 255); // 最大的红色
 
@@ -268,7 +295,7 @@ private:
 
         cv::Scalar lower_green_ = cv::Scalar(53, 163, 30);
         cv::Scalar upper_green_ = cv::Scalar(78, 255, 255);
-
+#endif
         cv::Scalar Ball_lower = cv::Scalar(0,43,46);
         cv::Scalar Ball_upper = cv::Scalar(6,255,255);
     };
@@ -305,7 +332,9 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr start_detect_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+#ifndef Desktop
     rclcpp::Subscription<ai_msgs::msg::PerceptionTargets>::SharedPtr yolo_sub_;
+#endif
 
     // * 发布器
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr twist_publisher_;
@@ -318,7 +347,9 @@ private:
     void startDetectCallback(const std_msgs::msg::String::SharedPtr msg);
     void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
     void imageCallback(const sensor_msgs::msg::Image::SharedPtr msg);
+#ifndef Desktop
     void yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr msg);
+#endif
 
     // * 功能函数
     void Speak(std::string strToSpeak);
@@ -349,7 +380,7 @@ void RosMainNode::startDetectCallback(const std_msgs::msg::String::SharedPtr msg
         RobotCount.nStartCount = 0;
     }
 }
-
+#ifndef Desktop
 void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr msg)
 {
     // 遍历所有目标对象并输出相关信息
@@ -357,7 +388,10 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
     {
         const auto &target = msg->targets[num];
         const auto &roi = target.rois[0].rect;
-        const auto area = roi.height * roi.width;
+        // * 目标面积 -- 判断是否最近
+        auto area = roi.height * roi.width;
+
+        // * 直道 -- 识别三个兵营旗帜
         if (state_ == STATE_STRAIGHT)
         {
             if (area > 16000)
@@ -366,13 +400,16 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
                 strFlag = target.rois[0].type;
             }
         }
+        // * 弯道 -- 识别粮仓旗帜
         if(state_ == STATE_ROTATE)
         {
             if(area > 16000)
             {
                 RobotFlags.bgranaryFound = true;
+                strFlag = target.rois[0].type;
             }
         }
+#ifdef YOLO_DEBUG
         RCLCPP_INFO(this->get_logger(),
                     "Target %zu: Type: %s, height=%d, width=%d, conf=%.2f",
                     num,
@@ -380,9 +417,10 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
                     roi.height,
                     roi.width,
                     target.rois[0].confidence);
+#endif
     }
 }
-
+#endif
 void RosMainNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
 {
     const auto &orientation = msg->orientation;
@@ -398,6 +436,8 @@ void RosMainNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
     // RCLCPP_INFO(this->get_logger(), "Yaw: %f degrees", RobotRun.currentYaw);
 }
 
+/// @brief 巡线摄像头回调
+/// @param msg 
 void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
     cv_bridge::CvImagePtr cv_ptr;
@@ -410,6 +450,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         RCLCPP_ERROR(this->get_logger(), "CV Bridge Error: %s", e.what());
         return;
     }
+    // ! 找球模式
     if (ImageState_ == IMAGE_STATE_FIND_BALL)
     {
 
@@ -460,6 +501,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             nTargetX /= nPixCount;
             nTargetY /= nPixCount;
 #ifdef Desktop
+            // * 画出球的中心
             Point line_begin = Point(nTargetX - 10, nTargetY);
             Point line_end = Point(nTargetX + 10, nTargetY);
             line(imgOriginal, line_begin, line_end, Scalar(255, 0, 0), 3);
@@ -469,6 +511,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             line_end.y = nTargetY + 10;
             line(imgOriginal, line_begin, line_end, Scalar(255, 0, 0), 3);
 #endif
+            // * 简略的PID控制
             fVelFoward = (nImgHeight / 2 - nTargetY) * 0.002;
             fVelTurn = (nImgWidth / 2 - nTargetX) * 0.003;
 #ifdef DEBUG
@@ -480,7 +523,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 
             // vel_cmd.linear.x = fVelFoward;
             // vel_cmd.angular.z = fVelTurn;
-            // ! 丑陋的滤波
+            // ! 丑陋的滤波 转角过小时取消转向
             // TODO 考虑更改
             if (fVelFoward >= 0 && fVelFoward <= 0.04)
             {
@@ -516,9 +559,9 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             // vel_cmd.angular.x = 0;
             // vel_cmd.angular.y = 0;
             // vel_cmd.angular.z = 0;
-            fVelFoward = 0;
-            fVelTurn = 0;
-            SetSpeed(fVelFoward, fVelTurn);
+            // fVelFoward = 0;
+            // fVelTurn = 0;
+            // SetSpeed(fVelFoward, fVelTurn);
         }
         // twist_publisher_->publish(vel_cmd);
 #ifdef Desktop
@@ -565,7 +608,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         // cv::imshow("Ball Tracking", cv_ptr->image);
         // cv::waitKey(1);
     }
-
+// * 巡线
     if (ImageState_ == IMAGE_STATE_FOLLOW_LINE)
     {
         // * 动态阈值二值化
@@ -620,8 +663,8 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             for (int z = startX; z > 6; --z)
             {
                 uchar pixel = binary.at<uchar>(y, z);
-                if ((pixel == 255 && binary.at<uchar>(y, z - 1) == 0 && binary.at<uchar>(y, z - 2) == 0) 
-                && binary.at<uchar>(y, z - 3) == 0 && binary.at<uchar>(y, z - 4) == 0 && binary.at<uchar>(y, z - 5) == 0 || z == 6)
+                if ((pixel == 255 && binary.at<uchar>(y, z - 1) == 0 && binary.at<uchar>(y, z - 2) == 0 && binary.at<uchar>(y, z - 3) == 0 &&
+                binary.at<uchar>(y, z - 4) == 0 && binary.at<uchar>(y, z - 5) == 0) || z == 6)
                 {
                     leftBoundary = z;
                     // cout << "leftBoundary: " << leftBoundary << endl;
@@ -630,17 +673,18 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             }
 
             // * 向右扫描，寻找右边界
-            for (int x = startX; x < cols - 2; ++x)
+            for (int x = startX; x < cols - 6; ++x)
             {
                 uchar pixel = binary.at<uchar>(y, x);
-                if ((pixel == 255 && binary.at<uchar>(y, x + 1) == 0 && binary.at<uchar>(y, x + 2) == 0) 
-                && binary.at<uchar>(y, x + 3) == 0&& binary.at<uchar>(y, x + 4) == 0&& binary.at<uchar>(y, x + 5) == 0|| x == cols - 6)
+                if ((pixel == 255 && binary.at<uchar>(y, x + 1) == 0 && binary.at<uchar>(y, x + 2) == 0 && binary.at<uchar>(y, x + 3) == 0 &&
+                binary.at<uchar>(y, x + 4) == 0 && binary.at<uchar>(y, x + 5) == 0) || x == cols - 6)
                 {
                     rightBoundary = x;
                     // cout << "rightBoundary: " << rightBoundary << endl;
                     break;
                 }
             }
+            // * 记录下两个边界值
             leftBoundaries[y] = leftBoundary;
             rightBoundaries[y] = rightBoundary;
             // * 记录当前行的中线，作为下一行的起点
@@ -699,7 +743,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         // 等待用户按键，按任意键关闭窗口
         waitKey(1);
 #endif
-
+// * 控制部分
         // * 获取中线位置，并计算偏移量
         int middle_x = auto_middle[300];
         int middle_offset = middle_x - cols / 2;
@@ -710,24 +754,12 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         // float auto_kp = PIDControl.kp1;
         //RCLCPP_INFO(this->get_logger(), "Middle Offset: %d", middle_offset);
         // * 转向逻辑
-        // ? 好像两个if的功能一样 考虑替换为 != 0
-        if (middle_offset > 0)
+        if (middle_offset != 0)
         {
             speedZ = PIDControl.error * auto_kp +
                      (PIDControl.error - PIDControl.last_error) * PIDControl.kd1;
 #ifdef DEBUG
-            // RCLCPP_INFO(this->get_logger(), "偏移向左，小车向右转");
             cout << "speedZ: " << speedZ << endl;
-#endif
-            SetSpeed(speedX, -speedZ);
-        }
-        else if (middle_offset < 0)
-        {
-            speedZ = PIDControl.error * auto_kp +
-                     (PIDControl.error - PIDControl.last_error) * PIDControl.kd1;
-#ifdef DEBUG
-            // RCLCPP_INFO(this->get_logger(), "偏移向右，小车向左转");
-            cout << "speedZ:" << speedZ << endl;
 #endif
             SetSpeed(speedX, -speedZ);
         }
@@ -883,7 +915,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         // 显示处理后的图像
         imshow("Detected Image", cv_ptr->image);
         cv::waitKey(1); // 每1ms刷新一次显示
-        #endif
+#endif
     }
 }
 /**********************************************************/
