@@ -67,7 +67,7 @@ public:
             });
 
         image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "/camera1_ns/image_raw", 10,
+            "/image_raw", 10,
             [this](const sensor_msgs::msg::Image::SharedPtr msg)
             {
                 // * 图像回调
@@ -651,20 +651,20 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         vector<int> auto_middle(rows, 0);
         float rows_area = 0.35;
         // * 第0行的中线从中间开始（假设为列数的一半）
-        middle[rows] = cols / 2; // == 320
+        middle[rows - 60] = cols / 2+40; // == 320
         auto_middle[rows] = cols / 2;
-        for (int y = rows - 1; y >= int(rows * rows_area); --y)
+        for (int y = rows - 60; y >= int(rows * rows_area); --y)
         {
             int leftBoundary = -1, rightBoundary = -1;
             // * 使用上一行的中线位置来决定当前行的扫描起点
             int startX = middle[y + 1];
-            // cout << "startX: " << startX << endl;
+            //cout << "startX: " << startX << endl;
             // * 向左扫描，寻找左边界
             for (int z = startX; z > 6; --z)
             {
                 uchar pixel = binary.at<uchar>(y, z);
                 if ((pixel == 255 && binary.at<uchar>(y, z - 1) == 0 && binary.at<uchar>(y, z - 2) == 0 && binary.at<uchar>(y, z - 3) == 0 &&
-                binary.at<uchar>(y, z - 4) == 0 && binary.at<uchar>(y, z - 5) == 0) || z == 6)
+                binary.at<uchar>(y, z - 4) == 0 && binary.at<uchar>(y, z - 5) == 0) || z == 7)
                 {
                     leftBoundary = z;
                     // cout << "leftBoundary: " << leftBoundary << endl;
@@ -677,7 +677,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             {
                 uchar pixel = binary.at<uchar>(y, x);
                 if ((pixel == 255 && binary.at<uchar>(y, x + 1) == 0 && binary.at<uchar>(y, x + 2) == 0 && binary.at<uchar>(y, x + 3) == 0 &&
-                binary.at<uchar>(y, x + 4) == 0 && binary.at<uchar>(y, x + 5) == 0) || x == cols - 6)
+                binary.at<uchar>(y, x + 4) == 0 && binary.at<uchar>(y, x + 5) == 0) || x == cols - 7)
                 {
                     rightBoundary = x;
                     // cout << "rightBoundary: " << rightBoundary << endl;
@@ -734,8 +734,22 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             {
                 circle(cv_ptr->image, Point(middle[y], y), 2, Scalar(0, 0, 255), -1);
             }
-            cv::line(cv_ptr->image, cv::Point(cols / 2, 0), cv::Point(cols / 2, rows), cv::Scalar(255, 0, 0), 1);
-            cv::line(cv_ptr->image, cv::Point(0, 300), cv::Point(cols, 300), cv::Scalar(255, 0, 0), 1);
+            if(auto_middle[y] != 0)
+            {
+                circle(cv_ptr->image, Point(auto_middle[y], y), 2, Scalar(0, 255, 0), -1);
+            }
+            cv::line(cv_ptr->image, cv::Point(cols / 2 + 40, 0),    // *画面一半的顶部
+                                    cv::Point(cols / 2 + 40, rows), // *画面一半的底部
+                                    cv::Scalar(255, 0, 0), 1); // *蓝色
+            cv::line(cv_ptr->image, cv::Point(0, 300),         // *300行的左边
+                                    cv::Point(cols, 300),      // *300行的右边
+                                    cv::Scalar(255, 0, 0), 1); // *蓝色
+            cv::line(cv_ptr->image, cv::Point(0, 260),         // *260行的左边
+                                    cv::Point(cols, 260),      // *260行的右边
+                                    cv::Scalar(255, 0, 0), 1); // *蓝色
+            cv::line(cv_ptr->image, cv::Point(0, rows - 60),         // *260行的左边
+                                    cv::Point(cols, rows - 60),      // *260行的右边
+                                    cv::Scalar(255, 0, 0), 1); // *蓝色
         }
 
         imshow("Result Image", cv_ptr->image);
@@ -745,14 +759,14 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 #endif
 // * 控制部分
         // * 获取中线位置，并计算偏移量
-        int middle_x = auto_middle[300];
-        int middle_offset = middle_x - cols / 2;
+        int middle_x = middle[300];
+        int middle_offset = middle_x - (cols / 2 + 40);
         PIDControl.error = middle_offset;
         float speedX = 0.24;
         float speedZ = 0;
         float auto_kp = Update_kp_Speed(PIDControl.error, 20, 110);
         // float auto_kp = PIDControl.kp1;
-        //RCLCPP_INFO(this->get_logger(), "Middle Offset: %d", middle_offset);
+        RCLCPP_INFO(this->get_logger(), "Middle Offset: %d", middle_offset);
         // * 转向逻辑
         if (middle_offset != 0)
         {
