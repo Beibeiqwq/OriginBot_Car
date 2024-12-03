@@ -1,4 +1,12 @@
-#include "rclcpp/rclcpp.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+#include <cmath>
+#include <cstdlib>
+#include <algorithm>
+#include <vector>
 #include "geometry_msgs/msg/twist.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "sensor_msgs/msg/image.hpp"
@@ -7,15 +15,8 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
-#include <opencv2/opencv.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include "opencv2/imgproc/imgproc.hpp"
-#include <cmath>
-#include <cstdlib>
-#include <algorithm>
-#include <vector>
 
-#define Desktop
+//#define Desktop
 
 #ifndef Desktop
 #include "ai_msgs/msg/perception_targets.hpp"
@@ -124,17 +125,18 @@ public:
         // * 机器识别标志位
         RobotFlags.bBallFound = false; // * 找到红球 -- HSV
         RobotFlags.bFlagFound = false; // * 找到旗帜 -- YOLOV5
+        RobotFlags.bBallStable = false;
         // ! 废弃 改用yolo
         // RobotFlags.bgranaryFound = false;
         // RobotFlags.bcavalryFound = false;
         // RobotFlags.bgranaryFound = false;
         // RobotFlags.btankFound = false;
-
         // * 机器识别计数
         RobotCount.nFlagCount = 0; // * 旗帜计数 -- 语音识别函数中
         RobotCount.nStartCount = 0; // * 红绿灯计数 -- 红绿灯回调
 
-                        
+        CvThreshold.Ball_lower = cv::Scalar(0,110,255);
+        CvThreshold.Ball_upper = cv::Scalar(255,255,255);
 
         // * PID参数
         // TODO 考虑修正 改为参数导入
@@ -159,7 +161,7 @@ public:
         cin >> _check_flag;
         ImageState_ = IMAGE_STATE_FOLLOW_LINE;
         // ! 调试时更改 最后记得改回
-        //state_ = STATE_WAIT_ENTER;
+        //state_ = STATE_FIND_BALL;
         state_ = STATE_STRAIGHT;
     }
 
@@ -235,7 +237,15 @@ private:
             ImageState_ = IMAGE_STATE_FIND_BALL;
             if (!RobotFlags.bBallFound)
             {
-                FindBall(); // 未编写
+                //FindBall(); // 未编写
+                ImageState_ = IMAGE_STATE_FIND_BALL;
+                //SetSpeed(0.1,0);
+            }
+            if(RobotFlags.bBallStable == true)
+            {
+                //ImageState_ = IMAGE_STATE_WAIT;
+                SetSpeed(0.2, 0);
+                cout << "Ball Found!" << endl;
             }
             break;
         default:
@@ -267,7 +277,7 @@ private:
     {
         bool bBallFound = false;
         bool bFlagFound = false;
-
+        bool bBallStable = false;
         bool bgranaryFound = false;  // *粮仓
         bool bcavalryFound = false;  // *骑兵营
         bool binfantryFound = false; // *步兵营
@@ -296,8 +306,8 @@ private:
         cv::Scalar lower_green_ = cv::Scalar(53, 163, 30);
         cv::Scalar upper_green_ = cv::Scalar(78, 255, 255);
 #endif
-        cv::Scalar Ball_lower = cv::Scalar(0,43,46);
-        cv::Scalar Ball_upper = cv::Scalar(6,255,255);
+        cv::Scalar Ball_lower = cv::Scalar(0,110,255);
+        cv::Scalar Ball_upper = cv::Scalar(179,255,255);
     };
     struct StructPIDControl
     {
@@ -318,6 +328,8 @@ private:
     };
 
     std::string strFlag = "";
+    int nVelForwardStable = 0;
+    int nVelTurnStable = 0;
     // * 结构体初始化
     StructCampFlags CampFlags;
     StructRobotRun RobotRun;
@@ -472,7 +484,6 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         // cv::Mat element = getStructuringElement(MORPH_RECT, Size(5, 5));
         // morphologyEx(mask, mask, MORPH_OPEN, element);
         // morphologyEx(mask, mask, MORPH_CLOSE, element);
-
         int nTargetX = 0;
         int nTargetY = 0;
         int nPixCount = 0;
@@ -496,10 +507,12 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         float fVelTurn = 0;
         // * 红色像素点阈值 > 200进入跟随
         // TODO 考虑修改为常量或参数
-        if (nPixCount > 200)
+        if (nPixCount > 5000)
         {
             nTargetX /= nPixCount;
             nTargetY /= nPixCount;
+
+
 #ifdef Desktop
             // * 画出球的中心
             Point line_begin = Point(nTargetX - 10, nTargetY);
@@ -512,12 +525,12 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             line(imgOriginal, line_begin, line_end, Scalar(255, 0, 0), 3);
 #endif
             // * 简略的PID控制
-            fVelFoward = (nImgHeight / 2 - nTargetY) * 0.002;
-            fVelTurn = (nImgWidth / 2 - nTargetX) * 0.003;
+            fVelFoward = (420 - nTargetY) * 0.002;
+            fVelTurn = (700 - nTargetX) * 0.003;
 #ifdef DEBUG
             printf("Target (%d, %d) PixelCount = %d\n", nTargetX, nTargetY, nPixCount);
-            printf("fVelFoward:%f  nImgHeight / 2 = %d", fVelFoward, nImgHeight / 2);
-            printf("fVelTurn:%f   nImgWidth /2 = %d", fVelTurn, nImgWidth / 2);
+            printf("fVelFoward:%f ", fVelFoward);
+            printf(" fVelTurn:%f  ", fVelTurn);
 #endif
             // geometry_msgs::msg::Twist vel_cmd;
 
@@ -525,22 +538,31 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             // vel_cmd.angular.z = fVelTurn;
             // ! 丑陋的滤波 转角过小时取消转向
             // TODO 考虑更改
-            if (fVelFoward >= 0 && fVelFoward <= 0.04)
+            // auto nVelForwardStable = 0;
+            // auto nVelTurnStable = 0;
+            if (fVelFoward >= -0.05 && fVelFoward <= 0.05)
             {
                 fVelFoward = 0;
+                nVelForwardStable++;
             }
-            else if (fVelFoward <= 0 && fVelFoward >= -0.04)
+            else
             {
-                fVelFoward = 0;
+                nVelForwardStable = 0;
             }
-            if (fVelTurn >= 0 && fVelTurn <= 0.04)
-            {
-                fVelTurn = 0;
-            }
-            else if (fVelTurn <= 0 && fVelTurn >= -0.04)
+            if (fVelTurn <= 0.05 && fVelTurn >= -0.05)
             {
                 fVelTurn = 0;
+                nVelTurnStable++;
             }
+            else
+            {
+                nVelTurnStable = 0;
+            }
+            if (nVelForwardStable > 30 && nVelTurnStable > 30)
+            {
+                RobotFlags.bBallStable = true;
+            }
+
             SetSpeed(fVelFoward, fVelTurn);
         }
         else
@@ -552,6 +574,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             RobotFlags.bBallFound = false;
 #ifdef DEBUG
             printf("Target disappeared...\n");
+            SetSpeed(0,0);
 #endif
             // vel_cmd.linear.x = 0;
             // vel_cmd.linear.y = 0;
@@ -651,7 +674,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         vector<int> auto_middle(rows, 0);
         float rows_area = 0.35;
         // * 第0行的中线从中间开始（假设为列数的一半）
-        middle[rows - 60] = cols / 2+40; // == 320
+        middle[rows - 60] = cols / 2 + 40; // == 320
         auto_middle[rows] = cols / 2;
         for (int y = rows - 60; y >= int(rows * rows_area); --y)
         {
@@ -667,7 +690,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 binary.at<uchar>(y, z - 4) == 0 && binary.at<uchar>(y, z - 5) == 0) || z == 7)
                 {
                     leftBoundary = z;
-                    // cout << "leftBoundary: " << leftBoundary << endl;
+                    cout << "leftBoundary: " << leftBoundary << endl;
                     break;
                 }
             }
@@ -680,7 +703,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 binary.at<uchar>(y, x + 4) == 0 && binary.at<uchar>(y, x + 5) == 0) || x == cols - 7)
                 {
                     rightBoundary = x;
-                    // cout << "rightBoundary: " << rightBoundary << endl;
+                    cout << "rightBoundary: " << rightBoundary << endl;
                     break;
                 }
             }
@@ -760,7 +783,8 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 // * 控制部分
         // * 获取中线位置，并计算偏移量
         int middle_x = middle[300];
-        int middle_offset = middle_x - (cols / 2 + 40);
+        cout << "middle_x: " << middle_x << endl;
+        int middle_offset = middle_x - (cols / 2 + 40);//360
         PIDControl.error = middle_offset;
         float speedX = 0.24;
         float speedZ = 0;
