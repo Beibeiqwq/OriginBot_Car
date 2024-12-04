@@ -68,7 +68,7 @@ public:
             });
 
         image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-            "/image_raw", 10,
+            "/camera1_ns/image_raw", 10,
             [this](const sensor_msgs::msg::Image::SharedPtr msg)
             {
                 // * 图像回调
@@ -406,7 +406,7 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
         // * 直道 -- 识别三个兵营旗帜
         if (state_ == STATE_STRAIGHT)
         {
-            if (area > 16000)
+            if (area > 12000)
             {
                 RobotFlags.bFlagFound = true;
                 strFlag = target.rois[0].type;
@@ -415,7 +415,7 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
         // * 弯道 -- 识别粮仓旗帜
         if(state_ == STATE_ROTATE)
         {
-            if(area > 16000)
+            if(area > 12000 &&(target.rois[0].type == "chu" ||target.rois[0].type == "han"))
             {
                 RobotFlags.bgranaryFound = true;
                 strFlag = target.rois[0].type;
@@ -507,7 +507,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         float fVelTurn = 0;
         // * 红色像素点阈值 > 200进入跟随
         // TODO 考虑修改为常量或参数
-        if (nPixCount > 5000)
+        if (nPixCount > 3000)
         {
             nTargetX /= nPixCount;
             nTargetY /= nPixCount;
@@ -525,8 +525,8 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             line(imgOriginal, line_begin, line_end, Scalar(255, 0, 0), 3);
 #endif
             // * 简略的PID控制
-            fVelFoward = (420 - nTargetY) * 0.002;
-            fVelTurn = (700 - nTargetX) * 0.003;
+            fVelFoward = (260 - nTargetY) * 0.002;
+            fVelTurn = (320 - nTargetX) * 0.003;
 #ifdef DEBUG
             printf("Target (%d, %d) PixelCount = %d\n", nTargetX, nTargetY, nPixCount);
             printf("fVelFoward:%f ", fVelFoward);
@@ -781,16 +781,23 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         waitKey(1);
 #endif
 // * 控制部分
+        float err = 0;
+        for(int i = 298;i<=302;i++)
+        {
+            err += middle[i];
+        }
+        err = err / 5.0;
+        float middle_x = err; 
         // * 获取中线位置，并计算偏移量
-        int middle_x = middle[300];
+        //int middle_x = middle[300];
         cout << "middle_x: " << middle_x << endl;
-        int middle_offset = middle_x - (cols / 2 + 40);//360
+        float middle_offset = middle_x - (cols / 2 + 40);//360
         PIDControl.error = middle_offset;
         float speedX = 0.24;
         float speedZ = 0;
         float auto_kp = Update_kp_Speed(PIDControl.error, 20, 110);
         // float auto_kp = PIDControl.kp1;
-        RCLCPP_INFO(this->get_logger(), "Middle Offset: %d", middle_offset);
+        RCLCPP_INFO(this->get_logger(), "Middle Offset: %f", middle_offset);
         // * 转向逻辑
         if (middle_offset != 0)
         {
