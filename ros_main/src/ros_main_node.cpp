@@ -16,6 +16,21 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 
+#define IMAGE_H 480
+#define IMAGE_W 640
+
+//加权控制
+const int Weight[70]=
+{
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,              //图像最远端00 ——09 行权重
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,               //图像最远端10 ——19 行权重
+        1, 1, 1, 1, 1, 1, 1, 3, 4, 5,              //图像最远端20 ——29 行权重
+        6, 7, 9,11,13,15,17,19,20,20,              //图像最远端30 ——39 行权重
+       19,17,15,13,11, 9, 7, 5, 3, 1,              //图像最远端40 ——49 行权重             //图像最远端50 ——59 行权重
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,              //图像最远端60 ——69 行权重
+};
+
 //#define Desktop
 
 #ifndef Desktop
@@ -404,6 +419,7 @@ int RosMainNode::Update_state(int flag)
     case 4:
         return STATE_FIND_BALL;
     }
+    return 1;
 }
 
 int RosMainNode::Update_image_state(int flag)
@@ -415,6 +431,7 @@ int RosMainNode::Update_image_state(int flag)
     case 2:
         return IMAGE_STATE_FIND_BALL;
     }
+    return 1;
 }
 void RosMainNode::startDetectCallback(const std_msgs::msg::String::SharedPtr msg)
 {
@@ -714,7 +731,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         vector<int> auto_middle(rows, 0);
         float rows_area = 0.35;
         // * 第0行的中线从中间开始（假设为列数的一半）
-        middle[rows - 60] = cols / 2 + 40; // == 320
+        middle[rows - 60] = cols / 2 + 40; // == 420行
         auto_middle[rows] = cols / 2;
         for (int y = rows - 60; y >= int(rows * rows_area); --y)
         {
@@ -730,7 +747,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 binary.at<uchar>(y, z - 4) == 0 && binary.at<uchar>(y, z - 5) == 0) || z == 7)
                 {
                     leftBoundary = z;
-                    cout << "leftBoundary: " << leftBoundary << endl;
+                    //cout << "leftBoundary: " << leftBoundary << endl;
                     break;
                 }
             }
@@ -743,7 +760,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
                 binary.at<uchar>(y, x + 4) == 0 && binary.at<uchar>(y, x + 5) == 0) || x == cols - 7)
                 {
                     rightBoundary = x;
-                    cout << "rightBoundary: " << rightBoundary << endl;
+                   // cout << "rightBoundary: " << rightBoundary << endl;
                     break;
                 }
             }
@@ -822,11 +839,13 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 #endif
 // * 控制部分
         float err = 0;
-        for(int i = 298;i<=322;i++)
+        float weight_count = 0;
+        for(int i = 275;i<=344;i++)
         {
-            err += middle[i];
+            err += middle[i] * Weight[i - 275];
+            weight_count += Weight[i - 275];
         }
-        err = err / 25.0;
+        err = err / weight_count;
         float middle_x = err; 
         // * 获取中线位置，并计算偏移量
         //int middle_x = middle[300];
