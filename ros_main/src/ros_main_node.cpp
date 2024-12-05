@@ -16,7 +16,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 
-#define Desktop
+//#define Desktop
 
 #ifndef Desktop
 #include "ai_msgs/msg/perception_targets.hpp"
@@ -565,8 +565,8 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             line(imgOriginal, line_begin, line_end, Scalar(255, 0, 0), 3);
 #endif
             // * 简略的PID控制
-            fVelFoward = (260 - nTargetY) * 0.002;
-            fVelTurn = (320 - nTargetX) * 0.003;
+            fVelFoward = (240 - nTargetY) * 0.004;
+            fVelTurn = (320 - nTargetX) * 0.007;
 #ifdef DEBUG
             printf("Target (%d, %d) PixelCount = %d\n", nTargetX, nTargetY, nPixCount);
             printf("fVelFoward:%f ", fVelFoward);
@@ -822,7 +822,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 #endif
 // * 控制部分
         float err = 0;
-        for(int i = 288;i<=312;i++)
+        for(int i = 298;i<=322;i++)
         {
             err += middle[i];
         }
