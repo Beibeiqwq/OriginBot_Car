@@ -1,4 +1,4 @@
-#include <rclcpp/rclcpp.hpp>
+#include "rclcpp/rclcpp.hpp"
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/highgui.hpp>
@@ -16,7 +16,7 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 
-//#define Desktop
+#define Desktop
 
 #ifndef Desktop
 #include "ai_msgs/msg/perception_targets.hpp"
@@ -49,7 +49,6 @@ enum StructRobotState
 enum StructImageState
 {
     IMAGE_STATE_WAIT,       // * 初始化
-    IMAGE_STATE_FIND_FLAG,  // * 找旗帜 || 直道赛道
     IMAGE_STATE_FOLLOW_LINE,// * 弯道赛道 || 障碍物
     IMAGE_STATE_FIND_BALL   // * 寻找红球
 };
@@ -66,7 +65,15 @@ public:
                 // * 订阅红绿灯识别节点
                 startDetectCallback(msg);
             });
-
+#ifdef Desktop
+        image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
+            "/image_raw", 10,
+            [this](const sensor_msgs::msg::Image::SharedPtr msg)
+            {
+                // * 图像回调
+                imageCallback(msg);
+            });
+#endif
         image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
             "/camera1_ns/image_raw", 10,
             [this](const sensor_msgs::msg::Image::SharedPtr msg)
@@ -156,13 +163,18 @@ public:
         PIDControl.last_error = 0;
 
         // * 启动程序
-        int _check_flag;
-        cout << "[Init]键入任意数字开始.... 按CTRL+Z退出" << endl;
-        cin >> _check_flag;
-        ImageState_ = IMAGE_STATE_FOLLOW_LINE;
-        // ! 调试时更改 最后记得改回
-        //state_ = STATE_FIND_BALL;
-        state_ = STATE_STRAIGHT;
+        int _state_flag;
+        cout << "[State]请输入当前程序状态:" << endl;
+        cout << "1: 等待红绿灯 2: 直线 3: 弯道 4: 找球" << endl;
+        cin >> _state_flag;
+        int _image_flag;
+        cout << "[State]请输入当前图像状态:" << endl;
+        cout << "1: 巡线 2: 找球 " << endl;
+        cin >> _image_flag;
+        ImageState_ = Update_image_state(_image_flag);
+        state_ = Update_state(_state_flag);
+        cout <<"[State]当前状态为:" << state_ << endl;
+        cout <<"[State]当前图像状态为:" << ImageState_ << endl;
     }
 
 private:
@@ -335,8 +347,8 @@ private:
     StructRobotRun RobotRun;
     StructRobotFlag RobotFlags;
     StructRobotCount RobotCount;
-    StructRobotState state_;
-    StructImageState ImageState_;
+    int state_;
+    int ImageState_;
     StructCvThreshold CvThreshold;
     StructPIDControl PIDControl;
 
@@ -372,10 +384,38 @@ private:
     void ProcessCamp(const std::string &strFlag);
     void PID_Choose(int cmd);
     float Update_kp_Speed(int error, int absmin, int absmax);
+    int Update_state(int flag);
+    int Update_image_state(int flag);
 };
 /**********************************************************/
 /*                       回调函数                          */
 /**********************************************************/
+
+int RosMainNode::Update_state(int flag)
+{
+    switch (flag)
+    {
+    case 1:
+        return STATE_WAIT_ENTER;
+    case 2:
+        return STATE_STRAIGHT;
+    case 3: 
+        return STATE_ROTATE;
+    case 4:
+        return STATE_FIND_BALL;
+    }
+}
+
+int RosMainNode::Update_image_state(int flag)
+{
+    switch (flag)
+    {
+    case 1:
+        return IMAGE_STATE_FOLLOW_LINE;
+    case 2:
+        return IMAGE_STATE_FIND_BALL;
+    }
+}
 void RosMainNode::startDetectCallback(const std_msgs::msg::String::SharedPtr msg)
 {
     if (msg->data == "open")
@@ -782,11 +822,11 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 #endif
 // * 控制部分
         float err = 0;
-        for(int i = 298;i<=302;i++)
+        for(int i = 288;i<=312;i++)
         {
             err += middle[i];
         }
-        err = err / 5.0;
+        err = err / 25.0;
         float middle_x = err; 
         // * 获取中线位置，并计算偏移量
         //int middle_x = middle[300];
