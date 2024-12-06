@@ -639,7 +639,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             RobotFlags.bBallFound = false;
 #ifdef DEBUG
             printf("Target disappeared...\n");
-            SetSpeed(0,0);
+            SetSpeed(0.15,0);
 #endif
             // vel_cmd.linear.x = 0;
             // vel_cmd.linear.y = 0;
