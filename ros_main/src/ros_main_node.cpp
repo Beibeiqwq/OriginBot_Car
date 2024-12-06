@@ -20,15 +20,19 @@
 #define IMAGE_W 640
 
 //加权控制
-const int Weight[70]=
-{
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,              //图像最远端00 ——09 行权重
+const int Weight[100] =
+    {
+        20, 20, 19, 17, 15, 13, 11, 11, 11, 11,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 图像最远端00 ——09 行权重
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,               //图像最远端10 ——19 行权重
-        1, 1, 1, 1, 1, 1, 1, 3, 4, 5,              //图像最远端20 ——29 行权重
-        6, 7, 9,11,13,15,17,19,20,20,              //图像最远端30 ——39 行权重
-       19,17,15,13,11, 9, 7, 5, 3, 1,              //图像最远端40 ——49 行权重             //图像最远端50 ——59 行权重
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,              //图像最远端60 ——69 行权重
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        // 图像最远端10 ——19 行权重
+        1, 1, 1, 1, 1, 1, 1, 3, 4, 5,          // 图像最远端20 ——29 行权重
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,          // 图像最远端30 ——39 行权重
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
+        1, 3, 5, 7, 9, 11, 13, 13, 15, 15,     // 图像最远端40 ——49 行权重             //图像最远端50 ——59 行权重
+        15, 15, 15, 17, 17, 17, 17, 19, 20, 20 // 图像最远端60 ——69 行权重
 };
 
 //#define Desktop
@@ -39,7 +43,7 @@ const int Weight[70]=
 
 
 #define DEBUG
-#define YOLO_DEBUG
+//#define YOLO_DEBUG
 //#define FLAG // ! 效果过差 改用Yolo
 using namespace std;
 using namespace cv;
@@ -89,6 +93,7 @@ public:
                 imageCallback(msg);
             });
 #endif
+#ifndef Desktop
         image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
             "/camera1_ns/image_raw", 10,
             [this](const sensor_msgs::msg::Image::SharedPtr msg)
@@ -96,7 +101,7 @@ public:
                 // * 图像回调
                 imageCallback(msg);
             });
-
+#endif
         imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
             "imu", 10,
             [this](const sensor_msgs::msg::Imu::SharedPtr msg)
@@ -166,7 +171,7 @@ public:
         PIDControl.ki = 0.0;
         PIDControl.kd = 0.0;
         // * 弯道PID
-        PIDControl.kp1 = 0.011;
+        PIDControl.kp1 = 0.022;
         PIDControl.ki1 = 0.0;
         PIDControl.kd1 = 0.003;
         // * 直道PID
@@ -235,7 +240,11 @@ private:
 
             // * 1.
             ImageState_ = IMAGE_STATE_FOLLOW_LINE;
-
+            if (RobotFlags.bFlagFound)
+            {
+                //SetSpeed(0.24, 0);
+                ProcessCamp(strFlag);
+            }
             // * 找到粮仓后 状态切换
             // * 2.
             if (RobotFlags.bgranaryFound == true)
@@ -249,7 +258,6 @@ private:
             // * 播报后停止四秒 寻找球
             // ! 回调函数也得停止
             // TODO 等待添加回调函数位
-
             // * 1. Reset
             SetSpeed(0, 0);
             state_ = STATE_WAIT_CMD;
@@ -459,11 +467,11 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
         const auto &roi = target.rois[0].rect;
         // * 目标面积 -- 判断是否最近
         auto area = roi.height * roi.width;
-
+        //cout << "area = " << area << endl;
         // * 直道 -- 识别三个兵营旗帜
         if (state_ == STATE_STRAIGHT)
         {
-            if (area > 12000)
+            if (area > 15000 && (target.rois[0].type != "chu" && target.rois[0].type != "han"))
             {
                 RobotFlags.bFlagFound = true;
                 strFlag = target.rois[0].type;
@@ -472,7 +480,7 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
         // * 弯道 -- 识别粮仓旗帜
         if(state_ == STATE_ROTATE)
         {
-            if(area > 12000 &&(target.rois[0].type == "chu" ||target.rois[0].type == "han"))
+            if(area > 15000 &&(target.rois[0].type == "chu" ||target.rois[0].type == "han"))
             {
                 RobotFlags.bgranaryFound = true;
                 strFlag = target.rois[0].type;
@@ -731,9 +739,9 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         vector<int> auto_middle(rows, 0);
         float rows_area = 0.35;
         // * 第0行的中线从中间开始（假设为列数的一半）
-        middle[rows - 60] = cols / 2 + 40; // == 420行
+        middle[rows - 20] = cols / 2 + 40; // == 420行
         auto_middle[rows] = cols / 2;
-        for (int y = rows - 60; y >= int(rows * rows_area); --y)
+        for (int y = rows - 20; y >= int(rows * rows_area); --y)
         {
             int leftBoundary = -1, rightBoundary = -1;
             // * 使用上一行的中线位置来决定当前行的扫描起点
@@ -840,10 +848,10 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 // * 控制部分
         float err = 0;
         float weight_count = 0;
-        for(int i = 275;i<=344;i++)
+        for(int i = 360;i<=459;i++)
         {
-            err += middle[i] * Weight[i - 275];
-            weight_count += Weight[i - 275];
+            err += middle[i] * Weight[i - 360];
+            weight_count += Weight[i - 360];
         }
         err = err / weight_count;
         float middle_x = err; 
