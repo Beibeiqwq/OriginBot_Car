@@ -534,7 +534,7 @@ int main() {
 		imger=er_zhi_ni(img);
 		ni_tou();
 		for (int y = 0; y < CAMERA_H; y++) {
-			for (int x = 0; x < CAMERA_W; x++) {
+			for (int x = 0; x < CAMERA_W; x++) {  
 				imgChu.at<uchar>(y, x) = image_final[y][x];
 			}
 		}

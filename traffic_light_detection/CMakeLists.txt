@@ -24,6 +24,7 @@ find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
 
 add_executable(traffic_light_node src/traffic_light_node.cpp)
+add_executable(lightprocess src/lightprocess.cpp)
 
 ament_target_dependencies(traffic_light_node
   rclcpp
@@ -31,8 +32,14 @@ ament_target_dependencies(traffic_light_node
   cv_bridge
   image_transport
 )
-
+ament_target_dependencies(lightprocess
+  rclcpp
+  sensor_msgs
+  cv_bridge
+  image_transport
+)
 target_link_libraries(traffic_light_node ${OpenCV_LIBRARIES})
+target_link_libraries(lightprocess ${OpenCV_LIBRARIES})
 # 安装配置文件夹
 install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/
@@ -40,6 +47,7 @@ install(DIRECTORY config/
 
 install(TARGETS
   traffic_light_node
+  lightprocess
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY

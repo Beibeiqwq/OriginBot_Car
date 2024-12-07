@@ -20,18 +20,22 @@
 #define IMAGE_W 640
 
 //加权控制
-const int Weight[100] =
+const int Weight[120] =
     {
-        20, 20, 19, 17, 15, 13, 11, 11, 11, 11,
+        15, 15, 13, 13, 13, 13, 11, 11, 11, 11,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 图像最远端00 ——09 行权重
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         // 图像最远端10 ——19 行权重
         1, 1, 1, 1, 1, 1, 1, 3, 4, 5,          // 图像最远端20 ——29 行权重
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,          // 图像最远端30 ——39 行权重
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
-        1, 3, 5, 7, 9, 11, 13, 13, 15, 15,     // 图像最远端40 ——49 行权重             //图像最远端50 ——59 行权重
+        //1, 1, 1, 1, 1, 1, 1, 1, 1, 1,          // 图像最远端30 ——39 行权重
+        //1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
+        1, 3, 5, 7, 9, 11, 13, 13, 15, 15, 
+        5, 15, 15, 17, 17, 17, 17, 19, 20, 20,
+        15, 15, 15, 17, 17, 17, 17, 19, 20, 20,    
         15, 15, 15, 17, 17, 17, 17, 19, 20, 20 // 图像最远端60 ——69 行权重
 };
 
@@ -171,7 +175,7 @@ public:
         PIDControl.ki = 0.0;
         PIDControl.kd = 0.0;
         // * 弯道PID
-        PIDControl.kp1 = 0.022;
+        PIDControl.kp1 = 0.03;
         PIDControl.ki1 = 0.0;
         PIDControl.kd1 = 0.003;
         // * 直道PID
@@ -262,7 +266,7 @@ private:
             SetSpeed(0, 0);
             state_ = STATE_WAIT_CMD;
             ImageState_ = IMAGE_STATE_WAIT;
-            std::this_thread::sleep_for(std::chrono::seconds(4));
+            std::this_thread::sleep_for(std::chrono::seconds(3));
 
             // * 2. Set
             state_ = STATE_FIND_BALL;
@@ -278,8 +282,9 @@ private:
             }
             if(RobotFlags.bBallStable == true)
             {
-                //ImageState_ = IMAGE_STATE_WAIT;
-                SetSpeed(0.2, 0);
+                ImageState_ = IMAGE_STATE_WAIT;
+                //SetSpeed(0.2, 0);
+                PushBall();
                 cout << "Ball Found!" << endl;
             }
             break;
@@ -365,6 +370,7 @@ private:
     std::string strFlag = "";
     int nVelForwardStable = 0;
     int nVelTurnStable = 0;
+    float fVelTurnCount = 0;
     // * 结构体初始化
     StructCampFlags CampFlags;
     StructRobotRun RobotRun;
@@ -403,6 +409,7 @@ private:
     void SetSpeed(float lineX, float angZ);
     void RobotCtl(const Twist &msg) const;
     void FindBall();
+    void PushBall();
     // * 程序功能函数
     void ProcessCamp(const std::string &strFlag);
     void PID_Choose(int cmd);
@@ -413,7 +420,21 @@ private:
 /**********************************************************/
 /*                       回调函数                          */
 /**********************************************************/
-
+void RosMainNode::PushBall()
+{
+    if(fVelTurnCount > 0)
+    {
+        SetSpeed(0.2,-0.5);
+    }
+    if(fVelTurnCount < 0)
+    {
+        SetSpeed(0.2,0.5);
+    }
+    if(fVelTurnCount == 0)
+    {
+        SetSpeed(0.2,0);
+    }
+}
 int RosMainNode::Update_state(int flag)
 {
     switch (flag)
@@ -443,18 +464,22 @@ int RosMainNode::Update_image_state(int flag)
 }
 void RosMainNode::startDetectCallback(const std_msgs::msg::String::SharedPtr msg)
 {
-    if (msg->data == "open")
+    if(state_ == STATE_WAIT_ENTER)
     {
-        RobotCount.nStartCount++;
-        if (RobotCount.nStartCount > 20)
+        if (msg->data == "open")
         {
-            state_ = STATE_WAIT_CMD;
-            RCLCPP_INFO(this->get_logger(), "State changed to STATE_WAIT_CMD.");
+            RobotCount.nStartCount++;
+            if (RobotCount.nStartCount > 20)
+            {
+                state_ = STATE_STRAIGHT;
+                RCLCPP_INFO(this->get_logger(), "State changed to STATE_STRAIGHT.");
+            }
         }
-    }
-    else
-    {
-        RobotCount.nStartCount = 0;
+        else
+        {
+            RobotCount.nStartCount = 0;
+        }
+
     }
 }
 #ifndef Desktop
@@ -590,8 +615,9 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             line(imgOriginal, line_begin, line_end, Scalar(255, 0, 0), 3);
 #endif
             // * 简略的PID控制
-            fVelFoward = (240 - nTargetY) * 0.004;
+            fVelFoward = (360 - nTargetY) * 0.004;
             fVelTurn = (320 - nTargetX) * 0.007;
+            fVelTurnCount += fVelTurn;
 #ifdef DEBUG
             printf("Target (%d, %d) PixelCount = %d\n", nTargetX, nTargetY, nPixCount);
             printf("fVelFoward:%f ", fVelFoward);
@@ -848,10 +874,10 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 // * 控制部分
         float err = 0;
         float weight_count = 0;
-        for(int i = 360;i<=459;i++)
+        for(int i = 340;i<=459;i++)
         {
-            err += middle[i] * Weight[i - 360];
-            weight_count += Weight[i - 360];
+            err += middle[i] * Weight[i - 340];
+            weight_count += Weight[i - 340];
         }
         err = err / weight_count;
         float middle_x = err; 
