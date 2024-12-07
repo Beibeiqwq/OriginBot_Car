@@ -84,6 +84,13 @@ private:
                 start_detect_publisher_->publish(*message);
                 break;  // 可以根据需求做更多处理
             }
+            else
+            {
+                auto message = std::make_shared<std_msgs::msg::String>();
+                message->data = "close";
+                start_detect_publisher_->publish(*message);
+                break; // 可以根据需求做更多处理
+            }
         }
 
     }

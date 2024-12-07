@@ -20,10 +20,14 @@
 #define IMAGE_W 640
 
 //加权控制
-const int Weight[120] =
+const int Weight[160] =
     {
         15, 15, 13, 13, 13, 13, 11, 11, 11, 11,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 图像最远端00 ——09 行权重
+        9, 9, 9, 9, 7, 7, 7, 5, 3, 1, // 图像最远端00 ——09 行权重
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -39,7 +43,7 @@ const int Weight[120] =
         15, 15, 15, 17, 17, 17, 17, 19, 20, 20 // 图像最远端60 ——69 行权重
 };
 
-//#define Desktop
+#define Desktop
 
 #ifndef Desktop
 #include "ai_msgs/msg/perception_targets.hpp"
@@ -199,6 +203,7 @@ public:
         state_ = Update_state(_state_flag);
         cout <<"[State]当前状态为:" << state_ << endl;
         cout <<"[State]当前图像状态为:" << ImageState_ << endl;
+        start_time = this->now();
     }
 
 private:
@@ -212,6 +217,14 @@ private:
 
         case STATE_WAIT_ENTER:
             // * 等待红绿灯
+            current_time = this->now();
+            duration = current_time - start_time;
+            if(duration.seconds() > 10)
+            {
+                state_ = STATE_STRAIGHT;
+                RCLCPP_INFO(this->get_logger(), "State changed to STATE_STRAIGHT.");
+                break;
+            }
             break;
         case STATE_STRAIGHT:
             // * 识别旗帜赛道
@@ -395,6 +408,9 @@ private:
 
     // * 定时器
     rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::Time start_time;
+    rclcpp::Time current_time;
+    rclcpp::Duration duration = current_time - start_time;
 
     // * 回调函数
     void startDetectCallback(const std_msgs::msg::String::SharedPtr msg);
@@ -424,11 +440,11 @@ void RosMainNode::PushBall()
 {
     if(fVelTurnCount > 0)
     {
-        SetSpeed(0.2,-0.5);
+        SetSpeed(0.2,-0.35);
     }
     if(fVelTurnCount < 0)
     {
-        SetSpeed(0.2,0.5);
+        SetSpeed(0.2,0.35);
     }
     if(fVelTurnCount == 0)
     {
@@ -615,7 +631,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
             line(imgOriginal, line_begin, line_end, Scalar(255, 0, 0), 3);
 #endif
             // * 简略的PID控制
-            fVelFoward = (360 - nTargetY) * 0.004;
+            fVelFoward = (360 - nTargetY) * 0.002;
             fVelTurn = (320 - nTargetX) * 0.007;
             fVelTurnCount += fVelTurn;
 #ifdef DEBUG
@@ -763,7 +779,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         vector<int> rightBoundaries(rows, -1);
         vector<int> middle(rows, 0);
         vector<int> auto_middle(rows, 0);
-        float rows_area = 0.35;
+        float rows_area = 0.30;
         // * 第0行的中线从中间开始（假设为列数的一半）
         middle[rows - 20] = cols / 2 + 40; // == 420行
         auto_middle[rows] = cols / 2;
@@ -874,10 +890,10 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 // * 控制部分
         float err = 0;
         float weight_count = 0;
-        for(int i = 340;i<=459;i++)
+        for(int i = 300;i<=459;i++)
         {
-            err += middle[i] * Weight[i - 340];
-            weight_count += Weight[i - 340];
+            err += middle[i] * Weight[i - 300];
+            weight_count += Weight[i - 300];
         }
         err = err / weight_count;
         float middle_x = err; 
@@ -886,7 +902,7 @@ void RosMainNode::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
         cout << "middle_x: " << middle_x << endl;
         float middle_offset = middle_x - (cols / 2 + 40);//360
         PIDControl.error = middle_offset;
-        float speedX = 0.24;
+        float speedX = 0.25;
         float speedZ = 0;
         float auto_kp = Update_kp_Speed(PIDControl.error, 20, 110);
         // float auto_kp = PIDControl.kp1;
