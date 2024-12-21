@@ -43,7 +43,7 @@ const int Weight[160] =
         15, 15, 15, 17, 17, 17, 17, 19, 20, 20 // 图像最远端60 ——69 行权重
 };
 
-#define Desktop
+//#define Desktop
 
 #ifndef Desktop
 #include "ai_msgs/msg/perception_targets.hpp"
@@ -217,9 +217,10 @@ private:
 
         case STATE_WAIT_ENTER:
             // * 等待红绿灯
+            ImageState_ = IMAGE_STATE_WAIT;
             current_time = this->now();
             duration = current_time - start_time;
-            if(duration.seconds() > 10)
+            if(duration.seconds() > 20)
             {
                 state_ = STATE_STRAIGHT;
                 RCLCPP_INFO(this->get_logger(), "State changed to STATE_STRAIGHT.");
@@ -232,7 +233,9 @@ private:
             // TODO 识别到旗帜后，进入调整为弯道PID
 
             // * 1.
-            ImageState_ = IMAGE_STATE_FOLLOW_LINE;
+            cout << "[State] 直道赛道" << endl;
+            ImageState_ = IMAGE_STATE_WAIT;
+            SetSpeed(0.2,0);
 
             // * 2.
             if (RobotCount.nFlagCount == 3)
@@ -257,6 +260,8 @@ private:
 
             // * 1.
             ImageState_ = IMAGE_STATE_FOLLOW_LINE;
+            cout << "[State] 弯道避障赛道" << endl;
+            cout << "[State] 当前图像状态为:" << ImageState_ << endl;
             if (RobotFlags.bFlagFound)
             {
                 //SetSpeed(0.24, 0);
@@ -295,7 +300,7 @@ private:
             }
             if(RobotFlags.bBallStable == true)
             {
-                ImageState_ = IMAGE_STATE_WAIT;
+                //ImageState_ = IMAGE_STATE_FOLLOW_LINE;
                 //SetSpeed(0.2, 0);
                 PushBall();
                 cout << "Ball Found!" << endl;
@@ -440,11 +445,11 @@ void RosMainNode::PushBall()
 {
     if(fVelTurnCount > 0)
     {
-        SetSpeed(0.2,-0.35);
+        SetSpeed(0.2,-0.3);
     }
     if(fVelTurnCount < 0)
     {
-        SetSpeed(0.2,0.35);
+        SetSpeed(0.2,0.3);
     }
     if(fVelTurnCount == 0)
     {
@@ -508,11 +513,23 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
         const auto &roi = target.rois[0].rect;
         // * 目标面积 -- 判断是否最近
         auto area = roi.height * roi.width;
-        //cout << "area = " << area << endl;
+        cout << "area = " << area << endl;
+        if(state_ == STATE_WAIT_ENTER)
+        {
+            if(target.rois[0].type == "green")
+            {
+                RobotCount.nStartCount++;
+                cout<< "green" << endl;
+            }
+            if(RobotCount.nStartCount>20)
+            {
+                state_ = STATE_STRAIGHT;
+            }
+        }
         // * 直道 -- 识别三个兵营旗帜
         if (state_ == STATE_STRAIGHT)
         {
-            if (area > 15000 && (target.rois[0].type != "chu" && target.rois[0].type != "han"))
+            if (area > 14000 && (target.rois[0].type != "chu" && target.rois[0].type != "han"))
             {
                 RobotFlags.bFlagFound = true;
                 strFlag = target.rois[0].type;
@@ -521,7 +538,7 @@ void RosMainNode::yoloCallback(const ai_msgs::msg::PerceptionTargets::SharedPtr 
         // * 弯道 -- 识别粮仓旗帜
         if(state_ == STATE_ROTATE)
         {
-            if(area > 15000 &&(target.rois[0].type == "chu" ||target.rois[0].type == "han"))
+            if(area > 10000 &&(target.rois[0].type == "chu" ||target.rois[0].type == "han"))
             {
                 RobotFlags.bgranaryFound = true;
                 strFlag = target.rois[0].type;
